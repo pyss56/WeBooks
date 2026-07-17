@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+{% block title %}预算管理{% endblock %}
+{% block nav_budget %}active{% endblock %}
+
+{% block extra_style %}
+.main-content { max-width: 1200px; }
+.header-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.header-card h1 { font-size: 20px; color: #07c160; }
+.header-card .info { font-size: 13px; color: #999; }
+.toolbar {
+    background: #fff;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.table-wrap { background: #fff; border-radius: 8px; overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+table { width: 100%; border-collapse: collapse; min-width: 700px; }
+thead { background: #fafafa; position: sticky; top: 0; z-index: 10; }
+th {
+    text-align: left; padding: 10px 10px; font-size: 12px; font-weight: 600; color: #666;
+    border-bottom: 2px solid #e8e8e8; white-space: nowrap;
+}
+th:first-child { padding-left: 16px; position: sticky; left: 0; background: #fafafa; z-index: 11; }
+td { padding: 0; border-bottom: 1px solid #f0f0f0; }
+td:first-child { padding-left: 16px; position: sticky; left: 0; background: #fff; z-index: 1; }
+tr:hover td:first-child { background: #fafcff; }
+.cell-cat { padding: 8px 10px; font-size: 13px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cell-cat .icon { flex-shrink: 0; width: 16px; text-align: center; font-size: 12px; }
+.cell-input { padding: 4px 6px; min-width: 100px; }
+.cell-input input {
+    width: 100%; min-width: 70px; max-width: 110px; padding: 6px 8px; border: 1px solid #e8e8e8; border-radius: 4px;
+    font-size: 13px; text-align: right; outline: none; transition: border-color .2s;
+}
+.cell-input input:focus { border-color: #07c160; box-shadow: 0 0 0 2px rgba(7,193,96,.15); }
+.cell-input input.has-value { background: #f6ffed; border-color: #b7eb8f; }
+.cell-input input::-webkit-outer-spin-button,
+.cell-input input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cell-input input[type=number] { -moz-appearance: textfield; }
+tr.parent-row { background: #fafafa; }
+tr.parent-row td { border-bottom: 2px solid #e8e8e8; }
+tr.parent-row td:first-child { background: #fafafa; }
+tr.parent-row .cell-cat { font-weight: 600; }
+tr.parent-row .cell-input input { background: #f5f5f5; color: #555; font-weight: 700; border-color: #e8e8e8; cursor: default; pointer-events: none; }
+tr.child-row td { padding-left: 0; }
+tr.child-row .cell-cat { padding-left: 36px; font-size: 13px; color: #555; }
+tr.child-row .cell-cat .sub-dot { color: #ccc; margin-right: 6px; }
+tr.child-row:hover { background: #fafcff; }
+tr.child-row.has-budget td { background: #f6ffed; }
+tr.child-row.has-budget td:first-child { background: #f6ffed; }
+.empty-row td { padding: 40px 24px; text-align: center; color: #999; font-size: 14px; }
+.level-badge { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+.level-badge.l1 { background: #e6f7ff; color: #1890ff; }
+.level-badge.l2 { background: #f6ffed; color: #52c41a; }
+.col-family { background: #fff7e6; }
+.col-family input { border-color: #ffd591; }
+.col-family input:focus { border-color: #fa8c16; box-shadow: 0 0 0 2px rgba(250,140,22,.15); }
+.col-family input.has-value { background: #fff7e6; }
+.col-user { }
+.col-user .user-label { font-size: 11px; color: #999; display: block; margin-top: 2px; }
+.modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+    background: #fff; border-radius: 8px; padding: 24px; width: 400px; max-width: 90vw;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+}
+.modal h3 { font-size: 16px; margin-bottom: 16px; }
+.modal .summary { font-size: 13px; color: #666; margin-bottom: 12px; padding: 8px 12px; background: #fafafa; border-radius: 4px; }
+.modal .field { margin-bottom: 12px; }
+.modal .field label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+.modal .field input { width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 14px; outline: none; }
+.modal .field input:focus { border-color: #07c160; }
+.modal .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+{% endblock %}
+
+{% block content %}
+<div class="header-card">
+    <div>
+        <h1>📊 预算管理</h1>
+        <div class="info">一级科目只读（自动汇总二级），家庭预算与各用户个人预算并列显示</div>
+    </div>
+</div>
+
+<div class="toolbar">
+    <label>月份：</label>
+    <input type="month" id="monthPicker" value="{{ cur_ym }}" onchange="switchMonth()"
+        style="padding:6px 10px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;outline:none;">
+    <button class="btn btn-outline" id="copyBtn" onclick="copyFromLastMonth()"
+        {% if has_current %}disabled{% endif %}>📋 从上月获取</button>
+    <button class="btn btn-outline" onclick="fillAll()">📋 批量填充</button>
+    <button class="btn btn-outline" onclick="clearAll()">🗑️ 清空全部</button>
+    <button class="btn btn-primary" onclick="doSave()">💾 保存</button>
+    <span id="monthHint" style="font-size:13px;color:#999;margin-left:auto;"></span>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th style="min-width:180px;">支出科目</th>
+                <th class="col-family" style="min-width:100px;">🏠 家庭预算</th>
+                {% for u in users %}
+                <th class="col-user" style="min-width:100px;">👤 {{ u.name }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody id="budgetTableBody"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+const TREE = {{ tree | tojson }};
+const LEAVES = {{ leaves | tojson }};
+const USERS = {{ users | tojson }};
+const FAMILY_BUDGETS = {{ family_budgets | tojson }};
+const USER_BUDGETS = {{ user_budgets | tojson }};
+const FAMILY_ACTUAL = {{ family_actual | tojson }};
+const USER_ACTUAL = {{ user_actual | tojson }};
+const CUR_YM = '{{ cur_ym }}';
+const HAS_CURRENT = {{ 'true' if has_current else 'false' }};
+
+function fmt(n) { return '¥' + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+function actualBar(budget, actual) {
+    if (!actual || actual <= 0) return '';
+    if (!budget || budget <= 0) {
+        return '<div style="font-size:11px;color:#999;margin-top:2px;white-space:nowrap;">'
+            + '📊 已花 ' + fmt(actual) + '（未设置预算）</div>';
+    }
+    const pct = Math.min(actual / budget * 100, 100);
+    const remaining = budget - actual;
+    const barLen = 8;
+    const filled = Math.round(pct / 100 * barLen);
+    const color = pct >= 100 ? '🔴' : pct >= 80 ? '⚠️' : pct >= 50 ? '⚡' : '✅';
+    const bar = '█'.repeat(filled) + '░'.repeat(barLen - filled);
+    const remainStr = remaining >= 0 ? '剩余 ' + fmt(remaining) : '超支 ' + fmt(Math.abs(remaining));
+    return '<div style="font-size:11px;color:#888;margin-top:2px;white-space:nowrap;">'
+        + color + ' 已花 ' + fmt(actual) + ' / ' + remainStr + ' (' + pct.toFixed(0) + '%)'
+        + '<span style="font-size:10px;color:#bbb;letter-spacing:1px;margin-left:4px;">' + bar + '</span></div>';
+}
+
+function switchMonth() {
+    const ym = document.getElementById('monthPicker').value;
+    if (ym) window.location.href = '/budgets?ym=' + ym;
+}
+
+function copyFromLastMonth() {
+    if (!confirm('确定从上个月复制预算到当前月份吗？')) return;
+    const btn = document.getElementById('copyBtn');
+    btn.disabled = true; btn.textContent = '复制中...';
+    fetch('/api/budget/copy-last-month', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({year_month: CUR_YM}),
+    }).then(r => r.json()).then(r => {
+        if (r.success) { showToast('✅ ' + r.message, 'success'); setTimeout(() => location.reload(), 1000); }
+        else { showToast('❌ ' + r.message, 'error'); btn.disabled = false; btn.textContent = '📋 从上月获取'; }
+    }).catch(e => { showToast('❌ ' + e.message, 'error'); btn.disabled = false; btn.textContent = '📋 从上月获取'; });
+}
+
+function render() {
+    const tbody = document.getElementById('budgetTableBody');
+    let html = '';
+    let leafCount = 0;
+    let setCount = 0;
+
+    for (const parent of TREE) {
+        if (parent.children.length > 0) {
+            html += `<tr class="parent-row">
+                <td><div class="cell-cat"><span class="icon">📁</span> ${parent.name} <span class="level-badge l1">一级</span></div></td>`;
+            html += `<td class="col-family"><div class="cell-input"><input type="number" id="sum_family_${parent.id}" readonly>
+                <div id="sum_actual_family_${parent.id}" style="font-size:11px;color:#999;margin-top:2px;"></div></div></td>`;
+            for (const u of USERS) {
+                html += `<td class="col-user"><div class="cell-input"><input type="number" id="sum_${u.code}_${parent.id}" readonly>
+                    <div id="sum_actual_${u.code}_${parent.id}" style="font-size:11px;color:#999;margin-top:2px;"></div></div></td>`;
+            }
+            html += `</tr>`;
+
+            for (const child of parent.children) {
+                leafCount++;
+                html += `<tr class="child-row">`;
+                html += `<td><div class="cell-cat"><span class="sub-dot">└─</span> ${child.name} <span class="level-badge l2">二级</span></div></td>`;
+                const fVal = FAMILY_BUDGETS[child.id] || '';
+                const fAct = FAMILY_ACTUAL[child.id] || 0;
+                if (fVal) setCount++;
+                html += `<td class="col-family"><div class="cell-input"><input type="number" step="0.01" min="0"
+                    id="input_family_${child.id}" value="${fVal}" placeholder="家庭"
+                    oninput="onLeafChange('${parent.id}')" class="${fVal ? 'has-value' : ''}">
+                    ${actualBar(parseFloat(fVal)||0, fAct)}</div></td>`;
+                for (const u of USERS) {
+                    const uVal = (USER_BUDGETS[u.code] && USER_BUDGETS[u.code][child.id]) || '';
+                    const uAct = (USER_ACTUAL[u.code] && USER_ACTUAL[u.code][child.id]) || 0;
+                    html += `<td class="col-user"><div class="cell-input"><input type="number" step="0.01" min="0"
+                        id="input_${u.code}_${child.id}" value="${uVal}" placeholder="${u.name}"
+                        oninput="onLeafChange('${parent.id}')" class="${uVal ? 'has-value' : ''}">
+                        ${actualBar(parseFloat(uVal)||0, uAct)}</div></td>`;
+                }
+                html += `</tr>`;
+            }
+        } else {
+            leafCount++;
+            html += `<tr>`;
+            html += `<td><div class="cell-cat"><span class="icon">📄</span> ${parent.name} <span class="level-badge l1">一级</span></div></td>`;
+            const fVal = FAMILY_BUDGETS[parent.id] || '';
+            const fAct = FAMILY_ACTUAL[parent.id] || 0;
+            if (fVal) setCount++;
+            html += `<td class="col-family"><div class="cell-input"><input type="number" step="0.01" min="0"
+                id="input_family_${parent.id}" value="${fVal}" placeholder="家庭"
+                oninput="onLeafChange('${parent.id}')" class="${fVal ? 'has-value' : ''}">
+                ${actualBar(parseFloat(fVal)||0, fAct)}</div></td>`;
+            for (const u of USERS) {
+                const uVal = (USER_BUDGETS[u.code] && USER_BUDGETS[u.code][parent.id]) || '';
+                const uAct = (USER_ACTUAL[u.code] && USER_ACTUAL[u.code][parent.id]) || 0;
+                html += `<td class="col-user"><div class="cell-input"><input type="number" step="0.01" min="0"
+                    id="input_${u.code}_${parent.id}" value="${uVal}" placeholder="${u.name}"
+                    oninput="onLeafChange('${parent.id}')" class="${uVal ? 'has-value' : ''}">
+                    ${actualBar(parseFloat(uVal)||0, uAct)}</div></td>`;
+            }
+            html += `</tr>`;
+        }
+    }
+
+    if (TREE.length === 0) {
+        html = '<tr class="empty-row"><td colspan="' + (2 + USERS.length) + '">暂无支出科目</td></tr>';
+    }
+    tbody.innerHTML = html;
+    updateAllSums();
+}
+
+function getInputVal(id) {
+    const el = document.getElementById(id);
+    if (!el) return 0;
+    const v = parseFloat(el.value);
+    return isNaN(v) ? 0 : v;
+}
+
+function getParentChildren(parentId) {
+    const parent = TREE.find(p => p.id === parentId);
+    if (!parent || !parent.children.length) return [parentId];
+    return parent.children.map(c => c.id);
+}
+
+function updateParentSum(prefix, parentId) {
+    const sumInput = document.getElementById(prefix + '_' + parentId);
+    if (!sumInput) return;
+    const children = getParentChildren(parentId);
+    const scopeKey = prefix.replace('sum_', '');
+    let sum = 0;
+    let actualSum = 0;
+    for (const cid of children) {
+        sum += getInputVal('input_' + scopeKey + '_' + cid);
+        if (scopeKey === 'family') {
+            actualSum += FAMILY_ACTUAL[cid] || 0;
+        } else {
+            actualSum += (USER_ACTUAL[scopeKey] && USER_ACTUAL[scopeKey][cid]) || 0;
+        }
+    }
+    sumInput.value = sum;
+    const actualEl = document.getElementById('sum_actual_' + prefix.replace('sum_', '') + '_' + parentId);
+    if (actualEl && actualSum > 0) {
+        actualEl.innerHTML = '📊 已花 ' + fmt(actualSum);
+    }
+}
+
+function updateAllSums() {
+    for (const parent of TREE) {
+        updateParentSum('sum_family', parent.id);
+        for (const u of USERS) {
+            updateParentSum('sum_' + u.code, parent.id);
+        }
+    }
+}
+
+function onLeafChange(parentId) { updateAllSums(); }
+
+function fillAll() {
+    const v = prompt('请为所有科目设置默认预算金额（元）：', '500');
+    if (v === null) return;
+    const n = parseFloat(v);
+    if (isNaN(n) || n <= 0) { showToast('请输入有效的金额', 'error'); return; }
+    for (const leaf of LEAVES) {
+        const el = document.getElementById('input_family_' + leaf.id);
+        if (el) { el.value = n; el.classList.add('has-value'); }
+        for (const u of USERS) {
+            const el2 = document.getElementById('input_' + u.code + '_' + leaf.id);
+            if (el2) { el2.value = n; el2.classList.add('has-value'); }
+        }
+    }
+    updateAllSums();
+    showToast('已填充', 'success');
+}
+
+function clearAll() {
+    if (!confirm('确定清空所有预算设置吗？')) return;
+    for (const leaf of LEAVES) {
+        const el = document.getElementById('input_family_' + leaf.id);
+        if (el) { el.value = ''; el.classList.remove('has-value'); }
+        for (const u of USERS) {
+            const el2 = document.getElementById('input_' + u.code + '_' + leaf.id);
+            if (el2) { el2.value = ''; el2.classList.remove('has-value'); }
+        }
+    }
+    updateAllSums();
+    showToast('已清空', 'success');
+}
+
+function collectAll() {
+    const result = {};
+    const family = {};
+    for (const leaf of LEAVES) {
+        const v = getInputVal('input_family_' + leaf.id);
+        if (v > 0) family[leaf.id] = v;
+    }
+    if (Object.keys(family).length > 0) result['family'] = family;
+    for (const u of USERS) {
+        const userData = {};
+        for (const leaf of LEAVES) {
+            const v = getInputVal('input_' + u.code + '_' + leaf.id);
+            if (v > 0) userData[leaf.id] = v;
+        }
+        if (Object.keys(userData).length > 0) result[u.code] = userData;
+    }
+    return result;
+}
+
+async function doSave() {
+    const budgets = collectAll();
+    const count = Object.values(budgets).reduce((s, o) => s + Object.keys(o).length, 0);
+    if (count === 0) { showToast('请先填写预算金额', 'error'); return; }
+    const btn = document.querySelector('.btn-primary[onclick*="doSave"]');
+    if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+    try {
+        const resp = await fetch('/api/budget/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ budgets, year_month: CUR_YM }),
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showToast('✅ ' + result.message, 'success');
+            for (const leaf of LEAVES) {
+                const fi = document.getElementById('input_family_' + leaf.id);
+                if (fi && fi.value) FAMILY_BUDGETS[leaf.id] = parseFloat(fi.value);
+                for (const u of USERS) {
+                    const ui = document.getElementById('input_' + u.code + '_' + leaf.id);
+                    if (ui && ui.value) {
+                        if (!USER_BUDGETS[u.code]) USER_BUDGETS[u.code] = {};
+                        USER_BUDGETS[u.code][leaf.id] = parseFloat(ui.value);
+                    }
+                }
+            }
+        } else {
+            showToast('❌ ' + result.message, 'error');
+        }
+    } catch (e) {
+        showToast('❌ 保存失败: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '💾 保存'; }
+    }
+}
+
+document.getElementById('monthHint').textContent = HAS_CURRENT ? '✅ ' + CUR_YM + ' 已有预算' : '📭 ' + CUR_YM + ' 暂无预算';
+render();
+{% endblock %}

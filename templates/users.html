@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block nav_users %}active{% endblock %}
+
+{% block content %}
+<h2>👥 用户管理</h2>
+<p class="subtitle">管理用户及消息平台账号绑定</p>
+
+<div id="user-container">
+    <div class="loading">加载中...</div>
+</div>
+
+<!-- Add/Edit User Modal -->
+<div class="modal-overlay" id="userModal">
+    <div class="modal" style="width:500px;">
+        <h3 id="userModalTitle">新建用户</h3>
+        <input type="hidden" id="formUserId">
+        <div class="field">
+            <label>用户名称</label>
+            <input type="text" id="formUserName" placeholder="请输入用户名称" maxlength="64">
+        </div>
+        <div class="field">
+            <label>用户编码（code）</label>
+            <input type="text" id="formUserCode" placeholder="留空则与名称相同" maxlength="64">
+            <div style="font-size:11px;color:#999;margin-top:2px;">用于区分交易记录的归属，建议使用拼音或英文缩写</div>
+        </div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeUserModal()">取消</button>
+            <button class="btn btn-primary" id="userSubmitBtn" onclick="submitUser()">创建</button>
+        </div>
+    </div>
+</div>
+
+<!-- Bind WeChat Modal -->
+<div class="modal-overlay" id="bindModal">
+    <div class="modal" style="width:500px;">
+        <h3>绑定消息平台账号</h3>
+        <p style="font-size:13px;color:#666;margin-bottom:12px;">正在为 <strong id="bindUserName"></strong> 绑定消息平台账号</p>
+        <input type="hidden" id="bindUserCode">
+        <div class="field">
+            <label>选择平台账号（可多选）</label>
+            <div id="sourceuserCheckboxes" style="max-height:200px;overflow-y:auto;border:1px solid #d9d9d9;border-radius:6px;padding:8px;"></div>
+            <div style="font-size:11px;color:#999;margin-top:4px;">一个平台账号只能绑定一个用户</div>
+        </div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeBindModal()">取消</button>
+            <button class="btn btn-primary" onclick="submitBind()">绑定</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_style %}
+.user-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
+}
+.user-card {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    transition: box-shadow 0.2s;
+}
+.user-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.user-card .avatar {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: #e8f5e9;
+    color: #2e7d32;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+.user-card .avatar.disabled { background: #f5f5f5; color: #bbb; }
+.user-card .info { flex: 1; min-width: 0; }
+.user-card .info .name { font-size: 14px; font-weight: 600; color: #333; }
+.user-card .info .meta { font-size: 12px; color: #999; margin-top: 2px; }
+.user-card .info .wx-list { font-size: 12px; color: #888; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+.user-card .info .wx-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #e8f0fe; color: #1a73e8; padding: 1px 8px;
+    border-radius: 10px; font-size: 11px;
+}
+.user-card .actions { display: flex; gap: 4px; margin-left: 8px; }
+.badge-enabled { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#e8f5e9; color:#2e7d32; }
+.badge-disabled { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#fce4ec; color:#c62828; }
+{% endblock %}
+
+{% block extra_script %}
+async function loadUsers() {
+    const container = document.getElementById('user-container');
+    try {
+        const resp = await fetch('/api/users/list');
+        const data = await resp.json();
+        if (!data.success) {
+            container.innerHTML = '<div class="error-msg">❌ ' + escapeHtml(data.message) + '</div>';
+            return;
+        }
+        const users = data.data || [];
+        let html = '<div class="toolbar"><button class="btn btn-primary" onclick="showAddUserModal()">➕ 新建用户</button></div>';
+        if (users.length === 0) {
+            html += '<div class="empty-msg">暂无用户</div>';
+        } else {
+            for (const u of users) {
+                const disabled = u.status === 0;
+                const sourceusers = u.sourceusers || [];
+                html += '<div class="user-section">';
+                html += '<div class="user-card">';
+                html += '  <div class="avatar' + (disabled ? ' disabled' : '') + '">' + (disabled ? '🚫' : '👤') + '</div>';
+                html += '  <div class="info">';
+                html += '    <div class="name">' + escapeHtml(u.name) + ' <span style="font-size:11px;color:#999;font-weight:400;">code: ' + escapeHtml(u.code) + '</span>';
+                html += '      ' + (disabled ? '<span class="badge-disabled">已停用</span>' : '<span class="badge-enabled">启用</span>');
+                html += '    </div>';
+                if (sourceusers.length > 0) {
+                    html += '    <div class="wx-list">';
+                    for (const w of sourceusers) {
+                        const su = typeof w === 'string' ? w : w.source_user;
+                        const src = typeof w === 'string' ? 'wecom' : (w.source || 'wecom');
+                        const pushOn = w.push_enabled === true;
+                        const srcLabel = {wecom: '企业微信', dingtalk: '钉钉'}[src] || src;
+                        html += `      <span class="wx-tag" style="position:relative;">`;
+                        html += `        💬 ${escapeHtml(su)} <span style="font-size:10px;color:#999;">(${escapeHtml(srcLabel)})</span>`;
+                        html += `        <span onclick="togglePushEnabled('${escapeHtml(u.code)}','${escapeHtml(su)}','${escapeHtml(src)}',${!pushOn})" style="cursor:pointer;font-size:10px;margin-left:3px;${pushOn?'color:#07c160;':'color:#999;'}" title="点击切换推送状态">📨${pushOn?'ON':'OFF'}</span>`;
+                        html += `        <a href="#" onclick="return unbindWx('${escapeHtml(su)}','${escapeHtml(src)}','${escapeHtml(u.name)}')" style="color:#c62828;text-decoration:none;font-size:12px;margin-left:2px;" title="解绑">✕</a>`;
+                        html += `      </span>`;
+                    }
+                    html += '    </div>';
+                } else {
+                    html += '    <div class="meta">未绑定平台账号</div>';
+                }
+                html += '  </div>';
+                html += '  <div class="actions">';
+                html += `    <button class="btn btn-outline btn-sm" onclick="showBindModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="绑定平台账号">🔗</button>`;
+                if (disabled) {
+                    html += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',1)" title="启用">▶️</button>`;
+                } else {
+                    html += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',0)" title="停用">⏸️</button>`;
+                }
+                html += `    <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${escapeHtml(u.name)}')" title="删除">🗑️</button>`;
+                html += '  </div>';
+                html += '</div></div>';
+            }
+        }
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function showAddUserModal() {
+    document.getElementById('userModalTitle').textContent = '新建用户';
+    document.getElementById('formUserId').value = '';
+    document.getElementById('formUserName').value = '';
+    document.getElementById('formUserCode').value = '';
+    document.getElementById('userSubmitBtn').textContent = '创建';
+    document.getElementById('userModal').classList.add('active');
+    setTimeout(() => document.getElementById('formUserName').focus(), 100);
+}
+
+function closeUserModal() {
+    document.getElementById('userModal').classList.remove('active');
+}
+
+async function submitUser() {
+    const name = document.getElementById('formUserName').value.trim();
+    if (!name) { showToast('请输入用户名称', 'error'); return; }
+    const code = document.getElementById('formUserCode').value.trim();
+    const btn = document.getElementById('userSubmitBtn');
+    btn.disabled = true; btn.textContent = '提交中...';
+    try {
+        const resp = await fetch('/api/users/create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, code: code || undefined}),
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showToast('✅ 用户已创建', 'success');
+            closeUserModal();
+            loadUsers();
+        } else {
+            showToast('❌ ' + result.message, 'error');
+        }
+    } catch (e) {
+        showToast('❌ ' + e.message, 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = '创建';
+    }
+}
+
+function showBindModal(userCode, userName) {
+    document.getElementById('bindUserCode').value = userCode;
+    document.getElementById('bindUserName').textContent = userName;
+    // 加载可用微信账号列表
+    const container = document.getElementById('sourceuserCheckboxes');
+    container.innerHTML = '<div class="loading" style="padding:10px;">加载中...</div>';
+    document.getElementById('bindModal').classList.add('active');
+    fetch('/api/users/available-sourceusers')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || !data.data || data.data.length === 0) {
+                container.innerHTML = '<div style="padding:12px;text-align:center;color:#999;font-size:13px;">暂无可用平台账号</div>';
+                return;
+            }
+            let html = '<div style="margin-bottom:8px;font-size:12px;color:#999;">勾选要绑定的平台账号，并设置是否接收推送通知</div>';
+            for (const w of data.data) {
+                const su = w.source_user || w;
+                const src = w.source || 'wecom';
+                const srcLabel = {wecom: '企业微信', dingtalk: '钉钉'}[src] || src;
+                html += '<div style="border:1px solid #eee;border-radius:6px;padding:6px 8px;margin-bottom:6px;">';
+                html += '  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">';
+                html += '    <input type="checkbox" class="sourceuser-cb" data-source="' + escapeHtml(src) + '" value="' + escapeHtml(su) + '" style="width:15px;height:15px;">';
+                html += '    <span style="font-size:11px;background:#e8f0fe;color:#1a73e8;padding:0 6px;border-radius:8px;">' + escapeHtml(srcLabel) + '</span> ' + escapeHtml(su);
+                html += '  </label>';
+                html += '  <label style="display:flex;align-items:center;gap:4px;margin-left:22px;margin-top:3px;cursor:pointer;font-size:12px;color:#666;">';
+                html += '    <input type="checkbox" class="push-cb" style="width:13px;height:13px;"> 接受定时推送通知';
+                html += '  </label>';
+                html += '</div>';
+            }
+            container.innerHTML = html;
+        })
+        .catch(e => {
+            container.innerHTML = '<div style="padding:12px;text-align:center;color:#c62828;font-size:13px;">加载失败: ' + escapeHtml(e.message) + '</div>';
+        });
+}
+
+function closeBindModal() {
+    document.getElementById('bindModal').classList.remove('active');
+}
+
+async function submitBind() {
+    const userCode = document.getElementById('bindUserCode').value;
+    const items = document.querySelectorAll('.sourceuser-cb:checked');
+    const selected = Array.from(items).map(cb => {
+        const container = cb.closest('div');
+        const pushCb = container.querySelector('.push-cb');
+        return {
+            source_user: cb.value,
+            source: cb.dataset.source || 'wecom',
+            push_enabled: pushCb ? pushCb.checked : false,
+        };
+    });
+    if (selected.length === 0) { showToast('请选择至少一个平台账号', 'error'); return; }
+    const btn = document.querySelector('#bindModal .btn-primary');
+    btn.disabled = true; btn.textContent = '绑定中...';
+    try {
+        for (const item of selected) {
+            const resp = await fetch('/api/users/bind-wx', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    user_code: userCode,
+                    source_user: item.source_user,
+                    source: item.source,
+                    push_enabled: item.push_enabled,
+                }),
+            });
+            const result = await resp.json();
+            if (!result.success) {
+                showToast('❌ ' + item.source_user + ': ' + result.message, 'error');
+                btn.disabled = false; btn.textContent = '绑定';
+                return;
+            }
+        }
+        showToast('✅ 已绑定 ' + selected.length + ' 个平台账号', 'success');
+        closeBindModal();
+        loadUsers();
+    } catch (e) {
+        showToast('❌ ' + e.message, 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = '绑定';
+    }
+}
+
+function unbindWx(source_user, source, userName) {
+    if (!confirm('确定解绑 ' + source_user + ' 与 ' + userName + ' 的绑定吗？')) return false;
+    fetch('/api/users/unbind-wx', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({source_user: source_user, source: source || 'wecom'}),
+    }).then(r => r.json()).then(r => {
+        if (r.success) { showToast('✅ 已解绑', 'success'); loadUsers(); }
+        else { showToast('❌ ' + r.message, 'error'); }
+    }).catch(e => showToast('❌ ' + e.message, 'error'));
+    return false;
+}
+
+function togglePushEnabled(userCode, sourceUser, source, newVal) {
+    fetch('/api/users/update-push', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_code: userCode, source_user: sourceUser, source: source, push_enabled: newVal}),
+    }).then(r => r.json()).then(r => {
+        if (r.success) { showToast('✅ 推送状态已更新', 'success'); loadUsers(); }
+        else { showToast('❌ ' + r.message, 'error'); }
+    }).catch(e => showToast('❌ ' + e.message, 'error'));
+}
+
+function toggleUser(userId, statusVal) {
+    const action = statusVal === 0 ? '停用' : '启用';
+    if (!confirm('确定' + action + '该用户吗？')) return;
+    fetch('/api/users/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: userId, status: statusVal}),
+    }).then(r => r.json()).then(r => {
+        if (r.success) { showToast('✅ 已' + action, 'success'); loadUsers(); }
+        else { showToast('❌ ' + r.message, 'error'); }
+    }).catch(e => showToast('❌ ' + e.message, 'error'));
+}
+
+function deleteUser(userId, userName) {
+    if (!confirm('确定永久删除用户「' + userName + '」吗？\n（仅当用户没有交易记录时才可删除）')) return;
+    fetch('/api/users/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: userId}),
+    }).then(r => r.json()).then(r => {
+        if (r.success) { showToast('✅ 已删除', 'success'); loadUsers(); }
+        else { showToast('❌ ' + r.message, 'error'); }
+    }).catch(e => showToast('❌ ' + e.message, 'error'));
+}
+
+loadUsers();
+{% endblock %}

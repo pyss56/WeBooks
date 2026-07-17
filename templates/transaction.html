@@ -1,0 +1,563 @@
+{% extends "base.html" %}
+{% block title %}交易查询{% endblock %}
+{% block nav_bills %}active{% endblock %}
+
+{% block content %}
+{% if error %}
+<div style="background:#fff3e0;border:1px solid #ffcc02;border-radius:8px;padding:16px 20px;margin-bottom:16px;color:#e65100;font-size:14px;">
+  ⚠️ {{ error }}
+</div>
+{% endif %}
+<h2>💰 交易查询</h2>
+<p class="subtitle">查看每一笔交易记录</p>
+
+<!-- 查询区域 -->
+<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
+      <select id="queryType" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        <option value="">全部</option>
+        <option value="income">收入</option>
+        <option value="expense">支出</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">科目</label>
+      <select id="queryAccount" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:140px;">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账人</label>
+      <select id="queryUser" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">是否对账</label>
+      <select id="queryRecon" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        <option value="">全部</option>
+        <option value="否">未对账</option>
+        <option value="是">已对账</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账时间从</label>
+      <input type="date" id="queryTimeFrom" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">至</label>
+      <input type="date" id="queryTimeTo" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">对账号</label>
+      <input type="text" id="queryReconNo" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:160px;">
+    </div>
+    <div>
+      <button class="btn btn-primary" onclick="loadBills(1)">🔍 查询</button>
+    </div>
+    <div>
+      <button class="btn btn-outline" onclick="resetQuery()">🔄 重置</button>
+    </div>
+  </div>
+</div>
+
+<!-- 汇总信息 -->
+<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+  <div style="background:#fff;border-radius:8px;padding:14px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);flex:1;min-width:140px;text-align:center;">
+    <div style="font-size:12px;color:#888;">总收入</div>
+    <div style="font-size:22px;font-weight:700;color:#2e7d32;" id="totalIncome">¥0.00</div>
+  </div>
+  <div style="background:#fff;border-radius:8px;padding:14px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);flex:1;min-width:140px;text-align:center;">
+    <div style="font-size:12px;color:#888;">总支出</div>
+    <div style="font-size:22px;font-weight:700;color:#c62828;" id="totalExpense">¥0.00</div>
+  </div>
+  <div style="background:#fff;border-radius:8px;padding:14px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);flex:1;min-width:140px;text-align:center;">
+    <div style="font-size:12px;color:#888;">净结余</div>
+    <div style="font-size:22px;font-weight:700;color:#1565c0;" id="totalBalance">¥0.00</div>
+  </div>
+  <div style="background:#fff;border-radius:8px;padding:14px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);flex:1;min-width:140px;text-align:center;">
+    <div style="font-size:12px;color:#888;">记录数</div>
+    <div style="font-size:22px;font-weight:700;color:#333;" id="totalCount">0</div>
+  </div>
+</div>
+
+<!-- 列表区域 -->
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:#fafafa;border-bottom:1px solid #eee;">
+        <th style="padding:12px 14px;text-align:left;color:#555;">ID</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;">类型</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">科目</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">账户</th>
+        <th style="padding:12px 14px;text-align:right;color:#555;">金额</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">备注</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">记账人</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;">记账时间</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;">对账标识</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">对账号</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;width:60px;">操作</th>
+      </tr>
+    </thead>
+    <tbody id="billsBody">
+      <tr><td colspan="11" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <h3 id="editTitle">编辑账单</h3>
+    <div class="field">
+      <label>类型</label>
+      <div style="padding:8px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;font-size:13px;color:#666;" id="editTypeDisplay"></div>
+    </div>
+    <div class="field">
+      <label>科目</label>
+      <select id="editCategory" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+        <option value="">加载中...</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>账户</label>
+      <select id="editAccount" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+        <option value="">加载中...</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>金额（元）</label>
+      <input type="number" id="editAmount" step="0.01" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+    </div>
+    <div class="field">
+      <label>备注</label>
+      <input type="text" id="editComment" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+    </div>
+    <div class="field">
+      <label>记账人</label>
+      <input type="text" id="editSourceUser" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+    </div>
+    <div class="field">
+      <label>记账时间</label>
+      <input type="text" id="editTime" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;" placeholder="YYYY-MM-DD HH:MM:SS">
+    </div>
+    <div class="btns">
+      <button class="btn btn-danger btn-sm" id="deleteBtn" onclick="confirmDeleteBill()" style="margin-right:auto;">🗑️ 删除</button>
+      <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary" id="editSubmitBtn" onclick="submitEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 分页 -->
+<div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap;">
+  <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;">
+    <label>每页</label>
+    <select id="pageSizeSelect" style="padding:6px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" onchange="loadBills(1)">
+      <option value="20">20</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+    </select>
+    <label>条</label>
+  </div>
+  <button class="btn btn-outline btn-sm" id="firstPage" onclick="loadBills(1)" disabled>首页</button>
+  <button class="btn btn-outline btn-sm" id="prevPage" onclick="loadBills(currentPage - 1)" disabled>上一页</button>
+  <span style="font-size:13px;color:#555;" id="pageInfo">第 1 页</span>
+  <button class="btn btn-outline btn-sm" id="nextPage" onclick="loadBills(currentPage + 1)">下一页</button>
+  <button class="btn btn-outline btn-sm" id="lastPage" onclick="goLastPage()">末页</button>
+  <div style="display:flex;align-items:center;gap:4px;font-size:13px;color:#555;">
+    <label>跳至</label>
+    <input type="number" id="jumpPage" min="1" style="width:56px;padding:6px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;text-align:center;" onkeydown="if(event.key==='Enter')jumpToPage()">
+    <button class="btn btn-primary btn-sm" onclick="jumpToPage()">GO</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_style %}
+<style>
+  .type-badge {
+    display:inline-block;padding:2px 10px;border-radius:8px;font-size:11px;font-weight:600;
+  }
+  .type-income { background:#e8f5e9;color:#2e7d32; }
+  .type-expense { background:#fce4ec;color:#c62828; }
+  .recon-badge {
+    display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;
+  }
+  .recon-yes { background:#e8f5e9;color:#2e7d32; }
+  .recon-no { background:#f5f5f5;color:#999; }
+  .amt-negative { color:#c62828; }
+  .amt-positive { color:#2e7d32; }
+  table tbody tr:hover { background:#f0f7ff; }
+  table tbody tr:nth-child(even) { background:#fafafa; }
+  .op-btn { padding:4px 8px;border:none;border-radius:3px;font-size:13px;cursor:pointer;background:none; }
+  .op-btn.edit:hover { background:#e3f2fd; }
+  .modal-overlay { display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center; }
+  .modal-overlay.active { display:flex; }
+  .modal { background:#fff;border-radius:12px;padding:28px;width:420px;max-width:90vw;box-shadow:0 4px 20px rgba(0,0,0,.15); }
+  .modal h3 { font-size:18px;margin-bottom:20px;color:#333; }
+  .modal .field { margin-bottom:14px; }
+  .modal .field label { display:block;font-size:12px;color:#888;margin-bottom:4px; }
+  .modal .btns { display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid #eee; }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+let currentPage = 1;
+
+function getPageSize() {
+  return parseInt(document.getElementById('pageSizeSelect').value) || 50;
+}
+
+function run_repl() {}
+
+function fmtMoney(v) {
+  return Number(v / 100 || 0).toLocaleString('zh-CN', {minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function getMonthStart() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+}
+function getMonthEnd() {
+  const d = new Date();
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return lastDay.getFullYear() + '-' + String(lastDay.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay.getDate()).padStart(2, '0');
+}
+function getToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function resetQuery() {
+  document.getElementById('queryType').value = '';
+  document.getElementById('queryAccount').value = '';
+  document.getElementById('queryUser').value = '';
+  document.getElementById('queryRecon').value = '';
+  document.getElementById('queryTimeFrom').value = getMonthStart();
+  document.getElementById('queryTimeTo').value = getMonthEnd();
+  document.getElementById('queryReconNo').value = '';
+  loadBills(1);
+}
+
+async function loadBills(page) {
+  currentPage = page;
+  const pageSize = getPageSize();
+  const tbody = document.getElementById('billsBody');
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', String(pageSize));
+    params.set('offset', String((page - 1) * pageSize));
+
+    const type = document.getElementById('queryType').value;
+    if (type) params.set('bill_type', type);
+    const acct = document.getElementById('queryAccount').value;
+    if (acct) params.set('account_filter', acct);
+    const user = document.getElementById('queryUser').value;
+    if (user) params.set('source_user', user);
+    const recon = document.getElementById('queryRecon').value;
+    if (recon) params.set('reconciliation_flag', recon);
+    const from = document.getElementById('queryTimeFrom').value;
+    const to = document.getElementById('queryTimeTo').value;
+    if (from) params.set('bill_time_from', from + ' 00:00:00');
+    if (to) params.set('bill_time_to', to + ' 23:59:59');
+    const reconNo = document.getElementById('queryReconNo').value.trim();
+    if (reconNo) params.set('reconciliation_no', reconNo);
+
+    const resp = await fetch('/api/transactions/list?' + params.toString());
+    const result = await resp.json();
+    if (!result.success) {
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      return;
+    }
+    const bills = result.data || [];
+    const total = result.total || 0;
+    const totalIncome = result.total_income || 0;
+    const totalExpense = result.total_expense || 0;
+    billsData = bills;
+
+    // 更新汇总（使用后端返回的汇总数据）
+    document.getElementById('totalIncome').textContent = '¥' + fmtMoney(totalIncome);
+    document.getElementById('totalExpense').textContent = '¥' + fmtMoney(totalExpense);
+    document.getElementById('totalBalance').textContent = '¥' + fmtMoney(totalIncome - totalExpense);
+    document.getElementById('totalCount').textContent = total;
+
+    // 更新分页
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    document.getElementById('pageInfo').textContent = '第 ' + page + ' 页 / 共 ' + totalPages + ' 页（' + total + ' 条）';
+    document.getElementById('firstPage').disabled = page <= 1;
+    document.getElementById('prevPage').disabled = page <= 1;
+    document.getElementById('nextPage').disabled = page >= totalPages;
+    document.getElementById('lastPage').disabled = page >= totalPages;
+    _totalPages = totalPages;
+
+    if (bills.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:#999;">暂无账单记录</td></tr>';
+      return;
+    }
+
+    let html = '';
+    bills.forEach(b => {
+      const typeClass = b.bill_type === 'income' ? 'type-income' : 'type-expense';
+      const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+      const amtClass = parseInt(b.amount || 0) >= 0 ? 'amt-positive' : 'amt-negative';
+      const reconClass = b.reconciliation_flag === '1' ? 'recon-yes' : 'recon-no';
+      html += '<tr>';
+      html += '<td style="padding:12px 14px;color:#888;font-size:12px;">' + b.id + '</td>';
+      html += '<td style="padding:12px 14px;text-align:center;"><span class="type-badge ' + typeClass + '">' + typeLabel + '</span></td>';
+      html += '<td style="padding:12px 14px;">' + escapeHtml(b.category_name || '') + '</td>';
+      html += '<td style="padding:12px 14px;color:#888;">' + escapeHtml(b.account_name || b.account_id || '') + '</td>';
+      html += '<td style="padding:12px 14px;text-align:right;font-weight:600;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
+      html += '<td style="padding:12px 14px;color:#888;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(b.comment || '') + '">' + escapeHtml(b.comment || '') + '</td>';
+      html += '<td style="padding:12px 14px;">' + escapeHtml(window._renderUser ? window._renderUser(b.created_by) : (b.created_by || '')) + '</td>';
+      html += '<td style="padding:12px 14px;text-align:center;font-size:12px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
+      html += '<td style="padding:12px 14px;text-align:center;"><span class="recon-badge ' + reconClass + '">' + (b.reconciliation_flag === '1' ? '是' : '否') + '</span></td>';
+      html += '<td style="padding:12px 14px;font-size:12px;color:#888;">' + escapeHtml(b.reconciliation_no || '') + '</td>';
+      html += '<td style="padding:12px 14px;text-align:center;">';
+      if (!b.reconciliation_no || b.reconciliation_flag === '0') {
+        html += '<button class="op-btn edit" onclick="openEditModal(' + b.id + ')">✏️</button>';
+      }
+      html += '</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+let editingBillId = null;
+let billsData = [];
+let editBillType = 'expense';
+let _totalPages = 1;
+
+function goLastPage() {
+  loadBills(_totalPages);
+}
+
+function jumpToPage() {
+  const input = document.getElementById('jumpPage');
+  let p = parseInt(input.value);
+  if (isNaN(p) || p < 1) p = 1;
+  if (p > _totalPages) p = _totalPages;
+  loadBills(p);
+  input.value = p;
+}
+
+function openEditModal(billId) {
+  const bill = billsData.find(b => b.id === billId);
+  if (!bill) return;
+  editingBillId = billId;
+  editBillType = bill.bill_type || 'expense';
+  const typeLabel = editBillType === 'income' ? '收入' : '支出';
+  document.getElementById('editTitle').textContent = '编辑账单 #' + billId;
+  document.getElementById('editTypeDisplay').textContent = typeLabel;
+  document.getElementById('editAmount').value = Math.abs(bill.amount || 0) / 100;
+  document.getElementById('editComment').value = bill.comment || '';
+  document.getElementById('editSourceUser').value = bill.created_by || '';
+  document.getElementById('editTime').value = bill.transaction_time || '';
+
+  // 加载科目下拉
+  const catSel = document.getElementById('editCategory');
+  catSel.innerHTML = '<option value="">加载中...</option>';
+  catSel.disabled = true;
+  fetch('/api/categories/leaf-names?bill_type=' + editBillType)
+    .then(r => r.json())
+    .then(result => {
+      catSel.innerHTML = '';
+      if (result.success && result.data) {
+        result.data.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          if (name === bill.category_name) opt.selected = true;
+          catSel.appendChild(opt);
+        });
+      }
+      catSel.disabled = false;
+    })
+    .catch(() => {
+      catSel.innerHTML = '<option value="">加载失败</option>';
+      catSel.disabled = false;
+    });
+
+  // 加载账户下拉
+  const acctSel = document.getElementById('editAccount');
+  acctSel.innerHTML = '<option value="">加载中...</option>';
+  acctSel.disabled = true;
+  fetch('/api/accounts')
+    .then(r => r.json())
+    .then(result => {
+      acctSel.innerHTML = '<option value="">-- 不修改 --</option>';
+      if (result.success && result.data) {
+        const flat = [];
+        (result.data || []).forEach(a => {
+          flat.push(a);
+          (a.subAccounts || []).forEach(s => flat.push(s));
+        });
+        flat.forEach(a => {
+          const opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = a.name;
+          if (String(a.id) === String(bill.account_id || bill.account_name)) opt.selected = true;
+          acctSel.appendChild(opt);
+        });
+      }
+      acctSel.disabled = false;
+    })
+    .catch(() => {
+      acctSel.innerHTML = '<option value="">加载失败</option>';
+      acctSel.disabled = false;
+    });
+
+  document.getElementById('editModal').classList.add('active');
+}
+
+function closeEditModal() {
+  document.getElementById('editModal').classList.remove('active');
+  editingBillId = null;
+}
+
+async function submitEdit() {
+  if (!editingBillId) return;
+  const btn = document.getElementById('editSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+  try {
+    const amount = (parseFloat(document.getElementById('editAmount').value) || 0);
+    const finalAmount = editBillType === 'expense' ? -amount : amount;
+    const body = {
+      id: editingBillId,
+      category_name: document.getElementById('editCategory').value,
+      amount: finalAmount,
+      comment: document.getElementById('editComment').value.trim(),
+      source_user: document.getElementById('editSourceUser').value.trim(),
+      bill_time: document.getElementById('editTime').value.trim(),
+    };
+    const acctId = document.getElementById('editAccount').value;
+    if (acctId) {
+      body.account_id = acctId;
+      // 从下拉列表取账户名称
+      const acctSel = document.getElementById('editAccount');
+      const selectedOpt = acctSel.options[acctSel.selectedIndex];
+      if (selectedOpt) body.account_name = selectedOpt.textContent;
+    }
+    const resp = await fetch('/api/transactions/modify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (result.success) {
+      showToast('✅ ' + result.message, 'success');
+      closeEditModal();
+      loadBills(currentPage);
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('❌ 保存失败: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
+  }
+}
+
+function confirmDeleteBill() {
+  if (!editingBillId) return;
+  if (!confirm('确定要删除此账单？\n该操作会同步从ledger中删除对应交易，不可恢复。')) return;
+  const btn = document.getElementById('deleteBtn');
+  btn.disabled = true;
+  btn.textContent = '删除中...';
+  fetch('/api/transactions/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: editingBillId}),
+  })
+    .then(r => r.json())
+    .then(result => {
+      if (result.success) {
+        showToast('✅ ' + result.message, 'success');
+        closeEditModal();
+        loadBills(currentPage);
+      } else {
+        showToast('❌ ' + result.message, 'error');
+      }
+    })
+    .catch(e => showToast('❌ 删除失败: ' + e.message, 'error'))
+    .finally(() => { btn.disabled = false; btn.textContent = '🗑️ 删除'; });
+}
+
+// 初始化加载科目和用户下拉
+async function initFilters() {
+  try {
+    const [acctResp, userResp] = await Promise.all([
+      fetch('/api/bills/accounts'),
+      fetch('/api/users/list?status=1')
+    ]);
+    const acctResult = await acctResp.json();
+    const userResult = await userResp.json();
+    if (acctResult.success) {
+      const sel = document.getElementById('queryAccount');
+      (acctResult.data || []).forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a;
+        opt.textContent = a;
+        sel.appendChild(opt);
+      });
+    }
+    if (userResult.success) {
+      const sel = document.getElementById('queryUser');
+      var userMap = {};
+      (userResult.data || []).forEach(function(u) {
+        userMap[u.code] = u.name;
+        var opt = document.createElement('option');
+        opt.value = u.code;
+        opt.textContent = u.name;
+        sel.appendChild(opt);
+      });
+      // 重写 loadBills 的记账人显示
+      var _origRender = window._renderUser || null;
+      if (!_origRender) {
+        window._renderUser = function(code) {
+          return userMap[code] || code || '';
+        };
+      }
+    }
+  } catch(e) {}
+  loadBills(1);
+}
+
+// 如果从外部链接跳转过来（带 focus_uuid），直接通过 UUID 获取交易并打开编辑（无需登录）
+const FOCUS_UUID = '{{ focus_uuid | e }}';
+if (FOCUS_UUID) {
+  (async function() {
+    try {
+      const resp = await fetch('/api/transactions/by-uuid?uuid=' + encodeURIComponent(FOCUS_UUID));
+      const result = await resp.json();
+      if (result.success && result.data) {
+        // 将单条交易插入 billsData 并打开编辑
+        billsData = [result.data];
+        renderBills();
+        openEditModal(result.data.id);
+      } else if (result.message) {
+        showToast(result.message, 'error');
+      }
+    } catch (e) {
+      showToast('加载交易失败', 'error');
+    }
+  })();
+}
+
+document.getElementById('queryTimeFrom').value = getMonthStart();
+document.getElementById('queryTimeTo').value = getMonthEnd();
+initFilters();
+{% endblock %}

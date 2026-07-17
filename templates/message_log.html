@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}消息日志{% endblock %}
+{% block nav_message_log %}active{% endblock %}
+
+{% block content %}
+<h2>📋 消息日志</h2>
+<p class="subtitle">企业微信消息交互记录</p>
+
+<!-- 查询区域 -->
+<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">消息类型</label>
+      <select id="queryType" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        <option value="">全部</option>
+        <option value="receive">接收</option>
+        <option value="send">发起</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">微信用户名</label>
+      <input type="text" id="queryUser" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:180px;">
+    </div>
+    <div>
+      <button class="btn btn-primary" onclick="loadLogs()">🔍 查询</button>
+    </div>
+    <div>
+      <button class="btn btn-outline" onclick="loadLogs()">🔄 刷新</button>
+    </div>
+  </div>
+</div>
+
+<!-- 列表区域 -->
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:#fafafa;border-bottom:1px solid #eee;">
+        <th style="padding:12px 16px;text-align:left;color:#555;">ID</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">类型</th>
+        <th style="padding:12px 16px;text-align:left;color:#555;">微信用户</th>
+        <th style="padding:12px 16px;text-align:left;color:#555;">入参</th>
+        <th style="padding:12px 16px;text-align:left;color:#555;">出参</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">处理结果</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">创建时间</th>
+      </tr>
+    </thead>
+    <tbody id="logBody">
+      <tr><td colspan="7" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block extra_style %}
+<style>
+  .type-badge {
+    display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;
+  }
+  .type-receive { background:#e3f2fd;color:#1565c0; }
+  .type-send { background:#fff3e0;color:#e65100; }
+  .result-badge {
+    display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;
+  }
+  .result-success { background:#e8f5e9;color:#2e7d32; }
+  .result-failed { background:#fce4ec;color:#c62828; }
+  .result-no_reply { background:#f5f5f5;color:#999; }
+  .json-cell {
+    max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:11px;color:#888;cursor:pointer;
+  }
+  .json-cell:hover { color:#333; }
+  table tbody tr:hover { background:#f0f7ff; }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadLogs() {
+  const tbody = document.getElementById('logBody');
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    const msgType = document.getElementById('queryType').value;
+    if (msgType) params.set('msg_type', msgType);
+    const sourceUser = document.getElementById('queryUser').value.trim();
+    if (sourceUser) params.set('source_user', sourceUser);
+
+    const resp = await fetch('/api/message-logs/list?' + params.toString());
+    const result = await resp.json();
+    if (!result.success) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      return;
+    }
+    const logs = result.data || [];
+    if (logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#999;">暂无消息日志</td></tr>';
+      return;
+    }
+    let html = '';
+    logs.forEach(log => {
+      const typeClass = log.msg_type === 'send' ? 'type-send' : 'type-receive';
+      const typeLabel = log.msg_type === 'send' ? '发起' : '接收';
+      const rClass = log.result === 'success' ? 'result-success' : (log.result === 'failed' ? 'result-failed' : 'result-no_reply');
+      html += '<tr>';
+      html += '<td style="padding:12px 16px;color:#888;font-size:12px;">' + log.id + '</td>';
+      html += '<td style="padding:12px 16px;text-align:center;"><span class="type-badge ' + typeClass + '">' + typeLabel + '</span></td>';
+      html += '<td style="padding:12px 16px;">' + escapeHtml(log.source_user || '') + '</td>';
+      html += '<td style="padding:12px 16px;"><div class="json-cell" title="' + escapeHtml(log.input_json || '') + '" onclick="alert(this.title)">' + escapeHtml((log.input_json || '').substring(0, 80)) + '</div></td>';
+      html += '<td style="padding:12px 16px;"><div class="json-cell" title="' + escapeHtml(log.output_json || '') + '" onclick="alert(this.title)">' + escapeHtml((log.output_json || '').substring(0, 80)) + '</div></td>';
+      html += '<td style="padding:12px 16px;text-align:center;"><span class="result-badge ' + rClass + '">' + escapeHtml(log.result || '') + '</span></td>';
+      html += '<td style="padding:12px 16px;text-align:center;font-size:12px;color:#888;">' + escapeHtml(log.created_at || '') + '</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+loadLogs();
+{% endblock %}

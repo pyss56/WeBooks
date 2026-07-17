@@ -1,0 +1,806 @@
+{% extends "base.html" %}
+{% block title %}计划任务{% endblock %}
+{% block nav_scheduler %}active{% endblock %}
+
+{% block content %}
+<h2>⏰ 计划任务</h2>
+<p class="subtitle">管理定时汇总推送任务</p>
+
+<div id="scheduler-container">
+    <div class="loading">加载中...</div>
+</div>
+
+<!-- Edit/Create Modal -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal">
+        <h3 id="editTitle">编辑任务</h3>
+        <input type="hidden" id="editJobId">
+        <input type="hidden" id="editIsNew" value="0">
+        <div class="field">
+            <label>任务名称</label>
+            <input type="text" id="editName" placeholder="请输入任务名称">
+        </div>
+        <div class="field">
+            <label>任务类型</label>
+            <select id="editTaskType" onchange="updateTaskTypeName()"></select>
+        </div>
+        <div class="field">
+            <label>查询时间范围</label>
+            <select id="editRangeType" onchange="onRangeTypeChange()" style="max-width:100%;"></select>
+        </div>
+        <div id="rangeCustomFields" style="display:none;">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
+                <div class="field" style="flex:1;margin-bottom:0;">
+                    <label>往前</label>
+                    <input type="number" id="editRangeValue" min="1" value="1" style="width:70px;">
+                </div>
+                <div class="field" style="flex:1;margin-bottom:0;">
+                    <label>单位</label>
+                    <select id="editRangeUnit">
+                        <option value="days">天</option>
+                        <option value="months">个月</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
+                <div class="field" style="flex:1;margin-bottom:0;">
+                    <label>起始时间</label>
+                    <input type="time" id="editRangeStartTime" value="00:00">
+                </div>
+                <div class="field" style="flex:1;margin-bottom:0;">
+                    <label>截止方式</label>
+                    <select id="editRangeEndType" onchange="onRangeEndTypeChange()">
+                        <option value="period_end">截止到当天结束</option>
+                        <option value="now">截止到当前时间</option>
+                        <option value="time">指定时间</option>
+                    </select>
+                </div>
+            </div>
+            <div class="field" id="editRangeEndTimeField" style="display:none;">
+                <label>截止时间</label>
+                <input type="time" id="editRangeEndTime" value="23:59">
+            </div>
+        </div>
+        <!-- 预算任务无额外字段 -->
+
+        <div class="field">
+            <label>执行频率</label>
+            <select id="editFrequency" onchange="onFrequencyChange()">
+                <option value="daily">每天</option>
+                <option value="monthly">每月</option>
+            </select>
+        </div>
+        <div class="field" id="editDayField" style="display:none;">
+            <label>执行日期（每月几号）</label>
+            <input type="number" id="editDay" min="1" max="28" value="1">
+        </div>
+        <div class="field">
+            <label>执行时间</label>
+            <input type="time" id="editTime">
+        </div>
+        <div class="field">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                <input type="checkbox" id="editPerUserPush" onchange="onPerUserPushChange()" style="width:15px;height:15px;">
+                ☑ 按用户分别推送（每个用户只收到自己的数据）
+            </label>
+            <div style="font-size:11px;color:#999;margin-top:2px;">勾选后以推送目标为准自动筛选，忽略「筛选用户」设置</div>
+        </div>
+        <div class="field">
+            <label>筛选用户（留空=家庭全部）</label>
+            <select id="editFilterUser" style="max-width:100%;">
+                <option value="">-- 不筛选（全部交易）--</option>
+            </select>
+            <div style="font-size:11px;color:#999;margin-top:2px;">用于筛选预算和交易数据</div>
+        </div>
+        <div class="field">
+            <label>推送目标</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input type="text" id="editPushUserDisplay" readonly style="flex:1;background:#f5f5f5;padding:8px 10px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;color:#666;cursor:default;" placeholder="点击右侧按钮选择...">
+                <button class="btn btn-outline btn-sm" onclick="showPushTargetModal()" style="white-space:nowrap;">选择</button>
+            </div>
+            <div style="font-size:11px;color:#999;margin-top:4px;">勾选项目用户，运行时自动向已启用推送的平台账号发送</div>
+        </div>
+        <input type="hidden" id="editPushUser" value="">
+
+        <!-- 自定义 SQL 区域 -->
+        <div id="customSqlFields" style="display:none;border-top:1px solid #eee;padding-top:14px;margin-top:6px;">
+            <div class="field">
+                <label>SQL 查询语句 <span style="font-size:11px;color:#999;">（支持 {filter_user} 变量）</span></label>
+                <textarea id="editCustomSql" rows="6" style="width:100%;padding:8px 10px;border:1px solid #d9d9d9;border-radius:6px;font-size:12px;font-family:Consolas,monospace;resize:vertical;box-sizing:border-box;"
+placeholder="SELECT ac.name AS category_name, SUM(t.amount)/100 AS total
+FROM &quot;transaction&quot; t
+LEFT JOIN account_category ac ON ac.id = t.category_id
+WHERE t.transaction_time >= datetime('now', '-7 days', 'localtime')
+  AND t.bill_type = 'expense'
+GROUP BY t.category_id
+ORDER BY total DESC
+LIMIT 10"></textarea>
+                <div style="font-size:11px;color:#999;margin-top:4px;">
+                  💡 可用 <code>{filter_user}</code> 引用筛选用户的编码，例如：
+                  <code>AND user_code = '{filter_user}'</code>
+                </div>
+            </div>
+            <div class="field">
+                <label>推送标题模板 <span style="font-size:11px;color:#999;">（可选，支持 {列名} 占位符）</span></label>
+                <input type="text" id="editCustomSqlTitle" placeholder='例如: 📊 近7天消费 TOP {category_name} 共 ¥{total}' style="width:100%;">
+                <div style="font-size:11px;color:#999;margin-top:2px;">留空则自动取 SQL 第一行的 title 或 category_name 列</div>
+            </div>
+            <div class="field">
+                <label>每行格式模板 <span style="font-size:11px;color:#999;">（可选，支持 {列名} 占位符）</span></label>
+                <input type="text" id="editCustomSqlFormat" placeholder='例如: {category_name}: ¥{total}' style="width:100%;">
+                <div style="font-size:11px;color:#999;margin-top:2px;">留空则默认用「|」拼接所有列值</div>
+            </div>
+        </div>
+        <input type="hidden" id="editRangeConfig" value="">
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
+            <button class="btn btn-primary" onclick="saveJob()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 推送目标选择弹窗 -->
+<div class="modal-overlay" id="pushTargetModal">
+    <div class="modal" style="width:500px;">
+        <h3>选择推送目标</h3>
+        <p style="font-size:13px;color:#666;margin-bottom:12px;">勾选需要推送的项目用户</p>
+        <div class="field">
+            <div id="pushUserCheckboxes" style="max-height:260px;overflow-y:auto;border:1px solid #d9d9d9;border-radius:6px;padding:8px 12px;">
+                <div style="padding:10px;color:#999;font-size:12px;">加载中...</div>
+            </div>
+            <div style="font-size:11px;color:#999;margin-top:4px;">运行时自动向勾选用户已启用「接受推送」的平台账号发送</div>
+        </div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closePushTargetModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmPushTargets()">确定</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+.scheduler-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 16px;
+}
+.scheduler-card .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.scheduler-card .header .name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+.scheduler-card .header .name .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+.badge-running { background: #e8f5e9; color: #2e7d32; }
+.badge-stopped { background: #fce4ec; color: #c62828; }
+.scheduler-card .info { font-size: 13px; color: #666; line-height: 1.8; }
+.scheduler-card .info span { margin-right: 16px; }
+.scheduler-card .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+.empty-msg { text-align: center; padding: 60px 20px; color: #999; font-size: 14px; }
+
+/* 弹窗样式 */
+.modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+    background: #fff; border-radius: 12px; padding: 28px;
+    width: 540px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,.15);
+}
+.modal h3 { font-size: 16px; margin-bottom: 16px; }
+.modal .field { margin-bottom: 14px; }
+.modal .field label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+.modal .field input, .modal .field select {
+    width: 100%; padding: 8px 10px; border: 1px solid #d9d9d9;
+    border-radius: 6px; font-size: 13px; outline: none; box-sizing: border-box;
+}
+.modal .field input:focus, .modal .field select:focus { border-color: #07c160; }
+.modal .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+{% endblock %}
+
+{% block extra_script %}
+let _jobs = [];
+let _users = [];
+let _dictRange = {};
+let _dictType = {};
+
+async function loadDicts() {
+    try {
+        const [r1, r2] = await Promise.all([
+            fetch('/api/dict/range_type').then(r => r.json()),
+            fetch('/api/dict/task_type').then(r => r.json()),
+        ]);
+        if (r1.success) _dictRange = r1.data || {};
+        if (r2.success) { _dictType = r2.data || {}; renderTaskTypeSelect(); }
+    } catch(e) {}
+}
+
+async function loadUsers() {
+    try {
+        const resp = await fetch('/api/users/list');
+        const data = await resp.json();
+        if (data.success) _users = data.data || [];
+    } catch(e) {}
+}
+
+function renderUserOptions(selectId, selected) {
+    const sel = document.getElementById(selectId);
+    let html = '<option value="">-- 不筛选（全部交易）--</option>';
+    for (const user of _users) {
+        const selAttr = user.name === selected ? ' selected' : '';
+        html += '<option value="' + escapeHtml(user.name) + '"' + selAttr + '>' + escapeHtml(user.name) + '</option>';
+    }
+    sel.innerHTML = html;
+}
+
+function renderTaskTypeSelect() {
+    const sel = document.getElementById('editTaskType');
+    let html = '';
+    for (const [code, label] of Object.entries(_dictType)) {
+        html += '<option value="' + code + '">' + label + '</option>';
+    }
+    sel.innerHTML = html;
+}
+
+function renderPushUserCheckboxes(selectedJson) {
+    const container = document.getElementById('pushUserCheckboxes');
+    // selectedJson: JSON array of user codes like '["zs","ls"]'
+    let selected = [];
+    try {
+        if (selectedJson) selected = JSON.parse(selectedJson);
+    } catch(e) {}
+    if (!Array.isArray(selected)) selected = [];
+
+    let html = '';
+    if (_users.length === 0) {
+        html = '<div style="padding:10px;color:#999;font-size:12px;">暂无用户数据</div>';
+    } else {
+        html = '<div style="padding:4px 4px 8px 4px;font-size:12px;">' +
+            '<a href="#" onclick="return toggleAllUserChecks(true)" style="color:#07c160;">全选</a>' +
+            ' <span style="color:#ccc;">|</span> ' +
+            '<a href="#" onclick="return toggleAllUserChecks(false)" style="color:#999;">取消全选</a>' +
+            '</div>';
+        for (const user of _users) {
+            const code = user.code || '';
+            const checked = selected.includes(code) ? ' checked' : '';
+            html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;">';
+            html += '  <input type="checkbox" class="push-user-cb" data-code="' + escapeHtml(code) + '"' + checked + ' style="width:16px;height:16px;">';
+            html += '  <span style="font-size:14px;font-weight:600;color:#333;">👤 ' + escapeHtml(user.name) + '</span>';
+            html += '</div>';
+        }
+    }
+    container.innerHTML = html;
+}
+
+function toggleAllUserChecks(checked) {
+    const container = document.getElementById('pushUserCheckboxes');
+    const cbs = container.querySelectorAll('.push-user-cb');
+    for (const cb of cbs) {
+        cb.checked = checked;
+    }
+    return false;
+}
+
+function updatePushUserDisplay() {
+    const raw = document.getElementById('editPushUser').value;
+    const display = document.getElementById('editPushUserDisplay');
+    if (raw) {
+        const codes = JSON.parse(raw);
+        const names = codes.map(c => { const u = _users.find(u => u.code === c); return u ? u.name : c; });
+        display.value = '已选择 ' + names.length + ' 个用户: ' + names.join('、');
+    } else {
+        display.value = '';
+    }
+}
+
+function showPushTargetModal() {
+    renderPushUserCheckboxes(document.getElementById('editPushUser').value);
+    document.getElementById('pushTargetModal').classList.add('active');
+}
+
+function closePushTargetModal() {
+    document.getElementById('pushTargetModal').classList.remove('active');
+}
+
+function confirmPushTargets() {
+    // 从复选框读取选择，写入隐藏字段
+    const raw = getPushUserJson();
+    document.getElementById('editPushUser').value = raw;
+    updatePushUserDisplay();
+    closePushTargetModal();
+}
+
+function getPushUserJson() {
+    const container = document.getElementById('pushUserCheckboxes');
+    const cbs = container.querySelectorAll('.push-user-cb:checked');
+    const codes = Array.from(cbs).map(cb => cb.dataset.code).filter(Boolean);
+    return codes.length > 0 ? JSON.stringify(codes) : '';
+}
+
+async function loadJobs() {
+    const container = document.getElementById('scheduler-container');
+    try {
+        if (!_users.length) await loadUsers();
+        if (!Object.keys(_dictRange).length && !Object.keys(_dictType).length) await loadDicts();
+        const resp = await fetch('/api/scheduler/jobs');
+        const data = await resp.json();
+        if (!data.success) {
+            container.innerHTML = '<div class="error-msg">❌ ' + escapeHtml(data.message) + '</div>';
+            return;
+        }
+        _jobs = data.jobs || [];
+        renderJobs();
+    } catch(e) {
+        container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+let _filterText = '';
+let _filterStatus = '';
+let _filterType = '';
+
+function renderJobs() {
+    const container = document.getElementById('scheduler-container');
+
+    // 筛选栏
+    let html = '<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">';
+    html += '  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">';
+    html += '    <div>';
+    html += '      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">任务名称</label>';
+    html += '      <input type="text" id="filterText" placeholder="搜索..." value="' + escapeHtml(_filterText) + '" oninput="applyFilter()" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:160px;">';
+    html += '    </div>';
+    html += '    <div>';
+    html += '      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">任务类型</label>';
+    html += '      <select id="filterType" onchange="applyFilter()" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">';
+    html += '        <option value="">全部</option>';
+    const _taskTypeEntries = Object.entries(_dictType);
+    for (let i = 0; i < _taskTypeEntries.length; i++) {
+        const [code, label] = _taskTypeEntries[i];
+        html += '        <option value="' + code + '"' + (_filterType === code ? ' selected' : '') + '>' + label + '</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div>';
+    html += '      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">状态</label>';
+    html += '      <select id="filterStatus" onchange="applyFilter()" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">';
+    html += '        <option value="">全部</option>';
+    html += '        <option value="running"' + (_filterStatus === 'running' ? ' selected' : '') + '>运行中</option>';
+    html += '        <option value="paused"' + (_filterStatus === 'paused' ? ' selected' : '') + '>已暂停</option>';
+    html += '      </select>';
+    html += '    </div>';
+    html += '    <div>';
+    html += '      <button class="btn btn-outline" onclick="resetFilter()">🔄 重置</button>';
+    html += '    </div>';
+    html += '  </div>';
+    html += '</div>';
+
+    // 工具栏
+    html += '<div class="toolbar" style="margin-bottom:16px;">';
+    html += '<button class="btn btn-primary" onclick="showNewJob()">➕ 新建任务</button>';
+    html += '</div>';
+
+    // 过滤
+    let filtered = _jobs;
+    if (_filterText) {
+        const ft = _filterText.toLowerCase();
+        filtered = filtered.filter(j => j.name.toLowerCase().includes(ft));
+    }
+    if (_filterStatus) {
+        filtered = filtered.filter(j => _filterStatus === 'running' ? j.enabled !== false : j.enabled === false);
+    }
+    if (_filterType) {
+        filtered = filtered.filter(j => j.task_type === _filterType);
+    }
+    if (!filtered.length) {
+        html += '<div class="empty-msg">' + (_jobs.length ? '没有匹配的计划任务' : '暂无计划任务') + '</div>';
+        container.innerHTML = html;
+        return;
+    }
+    let html_r = '';
+    for (const job of filtered) {
+        const enabled = job.enabled !== false;
+        const nextRun = job.next_run || '未调度';
+        html_r += '<div class="scheduler-card">';
+        html_r += '  <div class="header">';
+        html_r += '    <div class="name">' + escapeHtml(job.name) + '<span class="badge ' + (enabled ? 'badge-running' : 'badge-stopped') + '">' + (enabled ? '运行中' : '已暂停') + '</span></div>';
+        html_r += '  </div>';
+        html_r += '  <div class="info">';
+        let rangeText = '';
+        try { const rc = JSON.parse(job.range_config || '{}'); rangeText = _dictRange[rc.type] || rc.type || ''; } catch(e) {}
+        html_r += '    <span>📋 ' + escapeHtml(_dictType[job.task_type] || job.task_type || '-') + '</span>';
+        if (rangeText) html_r += '    <span>📅 范围: ' + escapeHtml(rangeText) + '</span>';
+        html_r += '    <span>⏱ ' + escapeHtml(job.cron_desc || '-') + '</span>';
+        html_r += '    <span>⏰ 下次执行: ' + escapeHtml(nextRun) + '</span>';
+        if (job.filter_user) html_r += '    <span>🔍 筛选: ' + escapeHtml(job.filter_user) + '</span>';
+        if (job.push_user_display) html_r += '    <span>📨 推送: ' + escapeHtml(job.push_user_display) + '</span>';
+        if (job.per_user_push) html_r += '    <span>🔀 分别推送</span>';
+        html_r += '  </div>';
+        html_r += '  <div class="actions">';
+        html_r += '    <button class="btn btn-outline btn-sm" onclick="editJob(\'' + job.id + '\')">✏️ 编辑</button>';
+        html_r += '    <button class="btn btn-primary btn-sm" onclick="runNow(\'' + job.id + '\')">▶️ 立即执行</button>';
+        if (enabled) {
+            html_r += '    <button class="btn btn-outline btn-sm" onclick="toggleJob(\'' + job.id + '\', false)">⏸ 暂停</button>';
+        } else {
+            html_r += '    <button class="btn btn-primary btn-sm" onclick="toggleJob(\'' + job.id + '\', true)">▶️ 启用</button>';
+        }
+        html_r += '    <button class="btn btn-danger btn-sm" onclick="deleteJob(\'' + job.id + '\', \'' + job.name.replace(/'/g, "\\'") + '\')">🗑 删除</button>';
+        html_r += '  </div>';
+        html_r += '</div>';
+    }
+    container.innerHTML = html + html_r;
+}
+
+function applyFilter() {
+    _filterText = document.getElementById('filterText').value;
+    _filterStatus = document.getElementById('filterStatus').value;
+    _filterType = document.getElementById('filterType').value;
+    renderJobs();
+}
+
+function resetFilter() {
+    _filterText = '';
+    _filterStatus = '';
+    _filterType = '';
+    renderJobs();
+}
+
+function onPerUserPushChange() {
+    const checked = document.getElementById('editPerUserPush').checked;
+    const sel = document.getElementById('editFilterUser');
+    sel.disabled = checked;
+    if (checked) {
+        sel.value = '';  // 置空
+    }
+}
+
+function onFrequencyChange() {
+    const freq = document.getElementById('editFrequency').value;
+    document.getElementById('editDayField').style.display = freq === 'monthly' ? 'block' : 'none';
+}
+
+function showNewJob() {
+    document.getElementById('editIsNew').value = '1';
+    document.getElementById('editJobId').value = '';
+    document.getElementById('editTitle').textContent = '新建任务';
+    document.getElementById('editName').value = '';
+    document.getElementById('editTaskType').value = 'no_budget_summary';
+    updateTaskTypeName();
+    document.getElementById('editFrequency').value = 'daily';
+    onFrequencyChange();
+    document.getElementById('editDay').value = '1';
+    document.getElementById('editTime').value = '21:00';
+    document.getElementById('editCustomSql').value = '';
+    document.getElementById('editCustomSqlTitle').value = '';
+    document.getElementById('editCustomSqlFormat').value = '';
+    document.getElementById('editPerUserPush').checked = false;
+    document.getElementById('editFilterUser').disabled = false;
+    renderUserOptions('editFilterUser', '');
+    // 初始化年份下拉
+    // 预算范围默认本月
+
+    document.getElementById('editPushUser').value = '';
+    document.getElementById('editPushUserDisplay').value = '';
+    rebuildRangeOptions();
+    applyRangeConfig({type: 'yesterday'});
+    document.getElementById('editModal').classList.add('active');
+    setTimeout(() => document.getElementById('editTaskType').focus(), 100);
+}
+
+function editJob(jobId) {
+    const job = _jobs.find(j => j.id === jobId);
+    if (!job) return;
+    document.getElementById('editIsNew').value = '0';
+    document.getElementById('editJobId').value = jobId;
+    document.getElementById('editTitle').textContent = '编辑 - ' + job.name;
+    document.getElementById('editName').value = job.name;
+    document.getElementById('editTaskType').value = job.task_type || job.id;
+    updateTaskTypeName();  // 重建范围选项、切换 SQL 区域等
+
+    if (job.day) {
+        document.getElementById('editFrequency').value = 'monthly';
+        document.getElementById('editDay').value = job.day;
+    } else {
+        document.getElementById('editFrequency').value = 'daily';
+    }
+    onFrequencyChange();
+    document.getElementById('editTime').value = String(job.hour || 21).padStart(2, '0') + ':' + String(job.minute || 0).padStart(2, '0');
+
+    document.getElementById('editCustomSql').value = job.custom_sql || '';
+    document.getElementById('editCustomSqlTitle').value = job.custom_sql_title || '';
+    document.getElementById('editCustomSqlFormat').value = job.custom_sql_format || '';
+    document.getElementById('editPerUserPush').checked = job.per_user_push === true;
+    document.getElementById('editFilterUser').disabled = job.per_user_push === true;
+    renderUserOptions('editFilterUser', job.per_user_push ? '' : (job.filter_user || ''));
+    // 恢复推送目标显示
+    document.getElementById('editPushUser').value = job.push_user || '';
+    updatePushUserDisplay();
+    applyRangeConfig(parseRangeConfig(job.range_config));
+
+    document.getElementById('editModal').classList.add('active');
+}
+
+
+
+function rebuildRangeOptions() {
+    const sel = document.getElementById('editRangeType');
+    const isBudget = document.getElementById('editTaskType').value === 'with_budget_summary';
+    const oldVal = sel.value;
+
+    if (isBudget) {
+        sel.innerHTML = '<option value="this_month">本月</option>' +
+                        '<option value="last_month">上个月</option>' +
+                        '<option value="this_quarter">本季度</option>' +
+                        '<option value="last_quarter">上季度</option>' +
+                        '<option value="this_year">本年</option>' +
+                        '<option value="last_year">去年</option>';
+    } else {
+        sel.innerHTML = '<option value="yesterday">昨天</option>' +
+                        '<option value="today">今天到现在</option>' +
+                        '<option value="last_month">上个月</option>' +
+                        '<option value="custom">自定义</option>';
+    }
+    // 保持选中或默认第一个
+    if (Array.from(sel.options).some(o => o.value === oldVal)) {
+        sel.value = oldVal;
+    }
+    onRangeTypeChange();
+}
+
+function onRangeTypeChange() {
+    const sel = document.getElementById('editRangeType');
+    const val = sel.value;
+    const showCustom = val === 'custom';
+    document.getElementById('rangeCustomFields').style.display = showCustom ? 'block' : 'none';
+    const unitSel = document.getElementById('editRangeUnit');
+    if (unitSel) {
+        unitSel.disabled = false;
+    }
+}
+
+function onRangeEndTypeChange() {
+    const show = document.getElementById('editRangeEndType').value === 'time';
+    document.getElementById('editRangeEndTimeField').style.display = show ? 'block' : 'none';
+}
+
+function getRangeConfig() {
+    const type = document.getElementById('editRangeType').value;
+    const isBudget = document.getElementById('editTaskType').value === 'with_budget_summary';
+    // 预算任务：直接使用 type 作为 range type
+    if (isBudget) {
+        return JSON.stringify({type: type});
+    }
+    if (type === 'custom') {
+        const cfg = {
+            type: 'custom',
+            start_value: parseInt(document.getElementById('editRangeValue').value) || 1,
+            start_unit: document.getElementById('editRangeUnit').value,
+        };
+        const st = document.getElementById('editRangeStartTime').value;
+        if (st) { const [h,m] = st.split(':'); cfg.start_hour = parseInt(h); cfg.start_minute = parseInt(m); }
+        cfg.end_type = document.getElementById('editRangeEndType').value;
+        if (cfg.end_type === 'time') {
+            const et = document.getElementById('editRangeEndTime').value;
+            if (et) { const [h,m] = et.split(':'); cfg.end_hour = parseInt(h); cfg.end_minute = parseInt(m); }
+        }
+        return JSON.stringify(cfg);
+    }
+    return JSON.stringify({type: type});
+}
+
+function parseRangeConfig(jsonStr) {
+    try { return JSON.parse(jsonStr); } catch(e) { return null; }
+}
+
+function applyRangeConfig(cfg) {
+    if (!cfg) {
+        document.getElementById('editRangeType').value = 'yesterday';
+        onRangeTypeChange();
+        return;
+    }
+    // budget 任务：预设范围类型，直接使用
+    if (['this_month','last_month','this_quarter','last_quarter','this_year','last_year'].includes(cfg.type)) {
+        document.getElementById('editRangeType').value = cfg.type;
+        onRangeTypeChange();
+        return;
+    }
+    document.getElementById('editRangeType').value = cfg.type || 'yesterday';
+    onRangeTypeChange();
+    if (cfg.type === 'custom') {
+        document.getElementById('editRangeValue').value = cfg.start_value || 1;
+        document.getElementById('editRangeUnit').value = cfg.start_unit || 'days';
+        if (cfg.start_hour !== undefined && cfg.start_minute !== undefined) {
+            document.getElementById('editRangeStartTime').value =
+                String(cfg.start_hour).padStart(2,'0') + ':' + String(cfg.start_minute).padStart(2,'0');
+        }
+        document.getElementById('editRangeEndType').value = cfg.end_type || 'period_end';
+        onRangeEndTypeChange();
+        if (cfg.end_type === 'time' && cfg.end_hour !== undefined) {
+            document.getElementById('editRangeEndTime').value =
+                String(cfg.end_hour).padStart(2,'0') + ':' + String(cfg.end_minute || 0).padStart(2,'0');
+        }
+    }
+}
+
+// Workaround: padStart polyfill for older rendering
+if (!String.prototype.padStart) {
+    String.prototype.padStart = function(len, ch) { var s=this; while(s.length<len) s=ch+s; return s; };
+}
+
+function updateTaskTypeName() {
+    const sel = document.getElementById('editTaskType');
+    const val = sel.value;
+    const isCustom = val === 'custom_sql';
+    const isBudget = val === 'with_budget_summary';
+    // 显示/隐藏自定义 SQL 区域
+    document.getElementById('customSqlFields').style.display = isCustom ? 'block' : 'none';
+    // 切换为自定义 SQL 时填充默认模板
+    if (isCustom) {
+        const sqlEl = document.getElementById('editCustomSql');
+        const titleEl = document.getElementById('editCustomSqlTitle');
+        const formatEl = document.getElementById('editCustomSqlFormat');
+        if (!sqlEl.value) {
+            sqlEl.value = `SELECT ac.name AS category_name, SUM(t.amount)/100 AS total
+FROM "transaction" t
+LEFT JOIN account_category ac ON ac.id = t.category_id
+WHERE t.transaction_time >= datetime('now', '-7 days', 'localtime')
+  AND t.bill_type = 'expense'
+GROUP BY t.category_id
+ORDER BY total DESC
+LIMIT 10`;
+        }
+        if (!titleEl.value) titleEl.value = '📊 {category_name} 共 ¥{total}';
+        if (!formatEl.value) formatEl.value = '{category_name}: ¥{total}';
+    }
+    // 自定义 SQL：隐藏范围选择；有预算汇总：显示月份选择
+    const rangeField = document.querySelector('#editRangeType').closest('.field');
+    if (rangeField) rangeField.style.display = isCustom ? 'none' : 'block';
+    document.getElementById('rangeCustomFields').style.display = 'none';
+    // 重建时间范围选项
+    if (!isCustom) rebuildRangeOptions();
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').classList.remove('active');
+}
+
+async function saveJob() {
+    const isNew = document.getElementById('editIsNew').value === '1';
+    const jobId = document.getElementById('editJobId').value;
+    const taskType = document.getElementById('editTaskType').value;
+    const name = document.getElementById('editName').value.trim();
+    const time = document.getElementById('editTime').value;
+    const freq = document.getElementById('editFrequency').value;
+    const day = freq === 'monthly' ? parseInt(document.getElementById('editDay').value) : null;
+
+    if (!time) { showToast('请选择执行时间', 'error'); return; }
+    if (!name) { showToast('请输入任务名称', 'error'); return; }
+
+    const filterUser = document.getElementById('editFilterUser').value;
+    const pushUser = document.getElementById('editPushUser').value;
+
+    // 校验：至少选择了一个推送目标
+    if (!pushUser) {
+        showToast('❌ 请至少选择一个推送目标（平台账号）', 'error');
+        return;
+    }
+
+    const rangeConfig = getRangeConfig();
+    const customSql = document.getElementById('editCustomSql').value.trim();
+    const customSqlTitle = document.getElementById('editCustomSqlTitle').value.trim();
+    const customSqlFormat = document.getElementById('editCustomSqlFormat').value.trim();
+    const perUserPush = document.getElementById('editPerUserPush').checked;
+
+    try {
+        const url = isNew ? '/api/scheduler/jobs/create' : '/api/scheduler/jobs/' + jobId + '/update';
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                name: name,
+                task_type: taskType,
+                time: time,
+                day: day,
+                frequency: freq,
+                filter_user: filterUser,
+                push_user: pushUser,
+                range_config: rangeConfig,
+                custom_sql: customSql,
+                custom_sql_title: customSqlTitle,
+                custom_sql_format: customSqlFormat,
+                per_user_push: perUserPush,
+            }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(isNew ? '✅ 任务已创建' : '✅ 已更新', 'success');
+            closeEditModal();
+            loadJobs();
+        } else {
+            showToast('❌ ' + data.message, 'error');
+        }
+    } catch(e) {
+        showToast('❌ 保存失败: ' + e.message, 'error');
+    }
+}
+
+// 点击遮罩关闭弹窗
+document.getElementById('editModal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditModal();
+});
+document.getElementById('pushTargetModal').addEventListener('click', function(e) {
+    if (e.target === this) closePushTargetModal();
+});
+
+let _runningJobs = {};
+
+async function runNow(jobId) {
+    if (_runningJobs[jobId]) { showToast('⏳ 任务正在执行中...', 'error'); return; }
+    _runningJobs[jobId] = true;
+    try {
+        const resp = await fetch('/api/scheduler/jobs/' + encodeURIComponent(jobId) + '/run', {method: 'POST'});
+        const data = await resp.json();
+        if (data.success) {
+            showToast('✅ 任务已触发', 'success');
+            loadJobs();
+        } else {
+            showToast('❌ ' + data.message, 'error');
+        }
+    } catch(e) {
+        showToast('❌ 触发失败: ' + e.message, 'error');
+    } finally {
+        delete _runningJobs[jobId];
+    }
+}
+
+async function deleteJob(jobId, jobName) {
+    if (!confirm('确认删除任务「' + jobName + '」？此操作不可撤销。')) return;
+    try {
+        const resp = await fetch('/api/scheduler/jobs/' + jobId + '/delete', {method: 'POST'});
+        const data = await resp.json();
+        if (data.success) {
+            showToast('任务已删除', 'success');
+            loadJobs();
+        } else {
+            showToast('删除失败: ' + (data.message || ''), 'error');
+        }
+    } catch (e) {
+        showToast('删除异常: ' + e.message, 'error');
+    }
+}
+
+async function toggleJob(jobId, enable) {
+    try {
+        const resp = await fetch('/api/scheduler/jobs/' + jobId + '/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enable: enable}),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(enable ? '✅ 任务已启用' : '⏸ 任务已暂停', 'success');
+            loadJobs();
+        } else {
+            showToast('❌ ' + data.message, 'error');
+        }
+    } catch(e) {
+        showToast('❌ 操作失败: ' + e.message, 'error');
+    }
+}
+
+loadJobs();
+{% endblock %}

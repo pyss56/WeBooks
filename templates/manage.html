@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}首页{% endblock %}
+{% block nav_home %}active{% endblock %}
+
+{% block content %}
+<h2>🏠 首页</h2>
+<p class="subtitle">本月预算执行情况</p>
+
+<div id="chart-container">
+    <div class="loading">加载预算数据中...</div>
+</div>
+
+
+{% endblock %}
+
+{% block extra_style %}
+.chart-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 24px;
+}
+.chart-section h3 {
+    font-size: 16px;
+    color: #333;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+.chart-bar-row { margin-bottom: 12px; }
+.chart-bar-row.child-row { padding-left: 24px; display: none; }
+.chart-bar-row.child-row.open { display: block; }
+.chart-bar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    cursor: pointer;
+    padding: 4px 0;
+    border-radius: 6px;
+    transition: background 0.15s;
+}
+.chart-bar-header.parent-header:hover { background: #f5faff; }
+.chart-bar-name { font-size: 13px; font-weight: 600; color: #444; display: flex; align-items: center; gap: 6px; }
+.chart-bar-name .expand-icon {
+    font-size: 10px;
+    color: #aaa;
+    width: 14px;
+    text-align: center;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+.chart-bar-name .expand-icon.expanded { transform: rotate(90deg); }
+.chart-bar-nums { font-size: 12px; color: #888; }
+.chart-bar-nums .num-spent { color: #2e7d32; font-weight: 600; }
+.chart-bar-nums .num-over { color: #c62828; font-weight: 600; }
+.chart-bar-track {
+    height: 22px;
+    background: #f0f0f0;
+    border-radius: 11px;
+    overflow: hidden;
+    display: flex;
+    position: relative;
+}
+.chart-bar-track.child-track { height: 18px; }
+.chart-bar-seg { height: 100%; transition: width 0.6s ease; }
+.chart-bar-seg.used { background: linear-gradient(90deg, #66bb6a, #43a047); }
+.chart-bar-seg.remaining { background: #e0e0e0; }
+.chart-bar-seg.over { background: linear-gradient(90deg, #ef5350, #c62828); }
+.chart-bar-label {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+}
+.chart-summary {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #eee;
+}
+.chart-summary-item { text-align: center; }
+.chart-summary-item .num { font-size: 20px; font-weight: 700; }
+.chart-summary-item .num.green { color: #2e7d32; }
+.chart-summary-item .num.red { color: #c62828; }
+.chart-summary-item .num.gray { color: #666; }
+.chart-summary-item .label { font-size: 12px; color: #888; margin-top: 2px; }
+.empty-state { text-align: center; padding: 40px 20px; color: #999; font-size: 14px; }
+.empty-state p { margin-top: 8px; }
+{% endblock %}
+
+{% block extra_script %}
+async function loadBudgetChart() {
+    const container = document.getElementById('chart-container');
+    try {
+        const resp = await fetch('/api/admin/budget-summary');
+        const data = await resp.json();
+        if (!data.success) {
+            container.innerHTML = '<div class="error-msg">❌ ' + escapeHtml(data.message) + '</div>';
+            return;
+        }
+        const tree = data.tree || [];
+        if (tree.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div style="font-size:40px;">📊</div><p>暂未设置预算</p><p style="font-size:12px;">前往「预算管理」设置月度预算后即可查看图表</p></div>';
+            return;
+        }
+
+        let totalBudget = 0, totalSpent = 0;
+        tree.forEach(p => { totalBudget += p.budget; totalSpent += p.spent; });
+
+        let html = '<div class="chart-section"><h3>📊 各科目预算使用 <button class="refresh-btn" onclick="loadBudgetChart()">🔄 刷新</button></h3>';
+
+        tree.forEach((parent, idx) => {
+            const pct = Math.min(parent.percentage, 100);
+            const usedWidth = Math.min(pct, 100);
+            const overPct = parent.over_budget ? Math.min((parent.spent - parent.budget) / parent.budget * 100, 100) : 0;
+            const overWidth = overPct;
+            const remainWidth = Math.max(100 - usedWidth - overWidth, 0);
+            const hasChildren = parent.children && parent.children.length > 0;
+            const expandId = 'child_' + idx;
+
+            html += '<div class="chart-bar-row">';
+            html += '  <div class="chart-bar-header parent-header" onclick="toggleChildren(\'' + expandId + '\')">';
+            html += '    <span class="chart-bar-name">';
+            if (hasChildren) {
+                html += '      <span class="expand-icon" id="icon_' + expandId + '">▶</span>';
+            } else {
+                html += '      <span class="expand-icon" style="visibility:hidden;">▶</span>';
+            }
+            html += '      ' + escapeHtml(parent.category_name) + ' <span style="font-size:10px;color:#999;font-weight:400;">(一级)</span>';
+            html += '    </span>';
+            html += '    <span class="chart-bar-nums">';
+            if (parent.over_budget) {
+                html += '      <span class="num-over">超支 ¥' + fmt(parent.spent - parent.budget) + '</span>';
+                html += '      / 预算 ¥' + fmt(parent.budget);
+            } else {
+                html += '      <span class="num-spent">已用 ¥' + fmt(parent.spent) + '</span>';
+                html += '      / 预算 ¥' + fmt(parent.budget);
+            }
+            html += '    </span>';
+            html += '  </div>';
+            html += '  <div class="chart-bar-track">';
+            if (usedWidth > 0) {
+                html += '    <div class="chart-bar-seg used" style="width:' + usedWidth + '%"></div>';
+            }
+            if (overWidth > 0) {
+                html += '    <div class="chart-bar-seg over" style="width:' + overWidth + '%"></div>';
+            }
+            if (remainWidth > 0 && !parent.over_budget) {
+                html += '    <div class="chart-bar-seg remaining" style="width:' + remainWidth + '%"></div>';
+            }
+            html += '    <span class="chart-bar-label">' + parent.percentage + '%</span>';
+            html += '  </div>';
+            html += '</div>';
+
+            // 子科目行（默认隐藏）
+            if (hasChildren) {
+                parent.children.forEach(child => {
+                    const cpct = Math.min(child.percentage, 100);
+                    const cUsed = Math.min(cpct, 100);
+                    const cOverPct = child.over_budget ? Math.min((child.spent - child.budget) / child.budget * 100, 100) : 0;
+                    const cOver = cOverPct;
+                    const cRemain = Math.max(100 - cUsed - cOver, 0);
+
+                    html += '<div class="chart-bar-row child-row" id="' + expandId + '">';
+                    html += '  <div class="chart-bar-header">';
+                    html += '    <span class="chart-bar-name" style="font-weight:400;font-size:12px;color:#666;">';
+                    html += '      <span style="color:#ccc;width:14px;text-align:center;flex-shrink:0;">└─</span>';
+                    html += '      ' + escapeHtml(child.category_name) + ' <span style="font-size:10px;color:#bbb;font-weight:400;">(二级)</span>';
+                    html += '    </span>';
+                    html += '    <span class="chart-bar-nums">';
+                    if (child.over_budget) {
+                        html += '      <span class="num-over">超支 ¥' + fmt(child.spent - child.budget) + '</span>';
+                    } else {
+                        html += '      <span class="num-spent">已用 ¥' + fmt(child.spent) + '</span>';
+                    }
+                    html += '      / 预算 ¥' + fmt(child.budget);
+                    html += '    </span>';
+                    html += '  </div>';
+                    html += '  <div class="chart-bar-track child-track">';
+                    if (cUsed > 0) {
+                        html += '    <div class="chart-bar-seg used" style="width:' + cUsed + '%"></div>';
+                    }
+                    if (cOver > 0) {
+                        html += '    <div class="chart-bar-seg over" style="width:' + cOver + '%"></div>';
+                    }
+                    if (cRemain > 0 && !child.over_budget) {
+                        html += '    <div class="chart-bar-seg remaining" style="width:' + cRemain + '%"></div>';
+                    }
+                    html += '    <span class="chart-bar-label">' + child.percentage + '%</span>';
+                    html += '  </div>';
+                    html += '</div>';
+                });
+            }
+        });
+
+        const totalPct = totalBudget > 0 ? (totalSpent / totalBudget * 100).toFixed(1) : 0;
+        const totalOver = totalSpent > totalBudget;
+        html += '<div class="chart-summary">';
+        html += '  <div class="chart-summary-item"><div class="num green">¥' + fmt(totalSpent) + '</div><div class="label">已支出</div></div>';
+        html += '  <div class="chart-summary-item"><div class="num gray">¥' + fmt(totalBudget) + '</div><div class="label">总预算</div></div>';
+        html += '  <div class="chart-summary-item"><div class="num ' + (totalOver ? 'red' : 'green') + '">' + totalPct + '%</div><div class="label">使用率</div></div>';
+        if (totalOver) {
+            html += '  <div class="chart-summary-item"><div class="num red">¥' + fmt(totalSpent - totalBudget) + '</div><div class="label">超支</div></div>';
+        } else {
+            html += '  <div class="chart-summary-item"><div class="num green">¥' + fmt(totalBudget - totalSpent) + '</div><div class="label">剩余</div></div>';
+        }
+        html += '</div></div>';
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function toggleChildren(id) {
+    const rows = document.querySelectorAll('#' + CSS.escape(id));
+    const icon = document.getElementById('icon_' + id);
+    let isOpen = false;
+    rows.forEach(r => {
+        r.classList.toggle('open');
+        if (r.classList.contains('open')) isOpen = true;
+    });
+    if (icon) {
+        icon.classList.toggle('expanded', isOpen);
+    }
+}
+
+function fmt(num) {
+    return Number(num).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+loadBudgetChart();
+{% endblock %}

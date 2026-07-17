@@ -1,0 +1,658 @@
+{% extends "base.html" %}
+{% block title %}账户设置{% endblock %}
+{% block nav_account %}active{% endblock %}
+
+{% block content %}
+<h2>👤 账户设置</h2>
+<p class="subtitle">管理账本账户</p>
+
+<div id="account-container">
+    <div class="loading">加载账户列表中...</div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="formModal">
+    <div class="modal">
+        <h3 id="formTitle">新增账户</h3>
+        <input type="hidden" id="formId">
+        <input type="hidden" id="formParentId" value="0">
+        <div class="field">
+            <label>账户名称</label>
+            <input type="text" id="formName" placeholder="请输入账户名称" maxlength="64">
+        </div>
+        <div class="field">
+            <label>图标</label>
+            <div class="icon-grid" id="iconGrid"></div>
+            <input type="hidden" id="formIcon" value="1">
+        </div>
+        <div class="field">
+            <label>颜色</label>
+            <div class="color-grid" id="colorGrid"></div>
+            <input type="hidden" id="formColor" value="ff6b22">
+        </div>
+        <div class="field">
+            <label>账户科目</label>
+            <select id="formCategory"></select>
+        </div>
+        <div class="field">
+            <label>币种</label>
+            <input type="text" id="formCurrency" value="CNY" maxlength="3" placeholder="CNY">
+        </div>
+        <div class="field">
+            <label>描述</label>
+            <textarea id="formComment" placeholder="可选" maxlength="255"></textarea>
+        </div>
+        <div class="field" id="formHiddenField" style="display:none;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <input type="checkbox" id="formHidden" style="width:16px;height:16px;">
+                <span>隐藏此账户</span>
+            </label>
+        </div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeFormModal()">取消</button>
+            <button class="btn btn-primary" id="formSubmitBtn" onclick="submitForm()">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal">
+        <h3>确认删除</h3>
+        <p style="font-size:14px;color:#666;margin-bottom:16px;">确定要删除账户 <strong id="deleteName"></strong> 吗？</p>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeDeleteModal()">取消</button>
+            <button class="btn btn-danger" id="deleteSubmitBtn" onclick="confirmDelete()">删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- Bind User Modal -->
+<div class="modal-overlay" id="bindModal">
+    <div class="modal" style="width:400px;">
+        <h3 id="bindTitle">绑定用户</h3>
+        <div id="bindUserList" style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;padding:8px;margin-bottom:14px;"></div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeBindModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmBind()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- Unbind Confirm Modal -->
+<div class="modal-overlay" id="unbindConfirmModal">
+    <div class="modal" style="width:420px;">
+        <h3>⚠️ 解绑确认</h3>
+        <div id="unbindConfirmBody" style="font-size:14px;color:#555;margin-bottom:16px;line-height:1.6;"></div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeUnbindConfirmModal()">取消</button>
+            <button class="btn btn-primary" id="unbindConfirmBtn" onclick="confirmUnbind()">继续解绑</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+.card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.parent-row {
+    background: #fafafa;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 2px solid #e8e8e8;
+    font-weight: 600;
+    font-size: 14px;
+}
+.parent-row .acct-name { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.parent-row .acct-name i { width: 18px; text-align: center; }
+.parent-row .acct-desc {
+    font-size: 11px; color: #999; font-weight: 400;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.parent-row .balance { font-size: 14px; font-weight: 700; color: #2e7d32; white-space: nowrap; margin-left: 8px; flex-shrink: 0; }
+.parent-row .balance.liability { color: #c62828; }
+.parent-row .actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+.child-list { padding: 0; }
+.child-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px 8px 36px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+    color: #555;
+    transition: background .2s;
+}
+.child-item:hover { background: #fafcff; }
+.child-item:last-child { border-bottom: none; }
+.child-item .name { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.child-item .sub-dot { color: #ccc; margin-right: 6px; }
+.child-item .balance { font-size: 13px; font-weight: 600; color: #2e7d32; white-space: nowrap; margin-left: 8px; flex-shrink: 0; }
+.child-item .balance.liability { color: #c62828; }
+.child-item .actions { margin-left: auto; display: flex; gap: 6px; }
+.loading { text-align: center; padding: 40px; color: #999; }
+.empty-msg { padding: 40px 24px; text-align: center; color: #999; font-size: 14px; }
+.error-msg { color: #c62828; background: #fce4ec; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+{% endblock %}
+
+{% block extra_script %}
+let _accountCategories = {};
+let _EDITING_ID = null;
+let _DELETE_ID = null;
+let _allUsers = [];
+let _accountIcons = [];
+
+const _acctColors = [
+    {id: 'ff6b22', name: '橙色'}, {id: 'ff9500', name: '琥珀'},
+    {id: 'ff2d55', name: '红色'}, {id: 'e4393c', name: '朱红'},
+    {id: '4cd964', name: '绿色'}, {id: '07c160', name: '草绿'},
+    {id: 'cddc39', name: '黄绿'}, {id: '009688', name: '青色'},
+    {id: '2196f3', name: '蓝色'}, {id: '1a73e8', name: '深蓝'},
+    {id: '673ab7', name: '紫色'}, {id: '8e8e93', name: '灰色'},
+    {id: '000000', name: '黑色'}, {id: 'ffffff', name: '白色'},
+];
+
+async function loadAccountCategories() {
+    try {
+        const resp = await fetch('/api/account-categories');
+        const data = await resp.json();
+        if (data.success) {
+            _accountCategories = {};
+            for (const cat of data.categories) {
+                _accountCategories[cat.id] = cat;
+            }
+        }
+    } catch(e) {}
+}
+
+async function loadUsers() {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const resp = await fetch('/api/users/list');
+            const data = await resp.json();
+            if (data.success && data.data) {
+                _allUsers = data.data;
+                return;
+            }
+        } catch(e) {}
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+    }
+}
+
+function getCategorySelect(selectedId) {
+    let html = '';
+    const ids = Object.keys(_accountCategories).sort((a,b) => a - b);
+    for (const id of ids) {
+        const sel = String(id) === String(selectedId) ? ' selected' : '';
+        const cat = _accountCategories[id];
+        const types = cat?.types || [];
+        const suffix = types.length > 1 ? ' (' + types.map(t => t.name).join('+') + ')' : '';
+        html += '<option value="' + id + '"' + sel + '>' + (cat?.name || '') + suffix + '</option>';
+    }
+    return html;
+}
+
+function onCategoryChange() {
+}
+
+function addSubAccountRow(data) {
+    const container = document.getElementById('subAccountInputs');
+    const idx = container.children.length;
+    const name = (data && data.name) || '';
+    const iconId = (data && data.icon) || document.getElementById('formIcon').value || '1';
+    const colorId = (data && data.color) || document.getElementById('formColor').value || 'ff6b22';
+    const iconMap = _accountIcons.find(i => i.id === iconId);
+    const iconCss = iconMap ? iconMap.css : 'las la-wallet';
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:6px 8px;border:1px solid #f0f0f0;border-radius:6px;background:#fafafa;';
+    div.innerHTML = '<span style="font-size:12px;font-weight:600;color:#999;width:20px;text-align:center;">' + (idx + 1) + '</span>'
+        + '<div class="sub-icon-wrap" style="position:relative;">'
+        + '  <span class="sub-icon-preview" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#' + colorId + '22;color:#' + colorId + ';font-size:14px;cursor:pointer;" onclick="var n=this.nextElementSibling;if(n)n.style.display=\'block\'"><i class="' + iconCss + '"></i></span>'
+        + '  <div class="sub-icon-grid" style="display:none;position:absolute;top:32px;left:0;z-index:10;background:#fff;border:1px solid #ddd;border-radius:6px;padding:4px;width:180px;max-height:120px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,.12);grid-template-columns:repeat(6,1fr);gap:2px;">'
+        +      _accountIcons.map(function(ic) {
+            return '<div data-icon-id="' + ic.id + '" style="display:flex;flex-direction:column;align-items:center;padding:3px 2px;border-radius:4px;cursor:pointer;font-size:10px;" onclick="selectSubIcon(this,&quot;' + ic.id + '&quot;,&quot;' + ic.css + '&quot;)">'
+                + '<i class="' + ic.css + '" style="font-size:14px;color:#555;"></i><span style="font-size:8px;color:#999;margin-top:1px;">' + (ic.name || '') + '</span></div>';
+        }).join('')
+        + '  </div>'
+        + '</div>'
+        + '<input type="text" class="sub-acct-name" value="' + name.replace(/"/g,'&quot;') + '" placeholder="子账户名称" maxlength="64" style="flex:1;padding:5px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">'
+        + '<input type="hidden" class="sub-acct-icon" value="' + iconId + '">'
+        + '<input type="hidden" class="sub-acct-color" value="' + colorId + '">'
+        + '<button class="btn btn-danger btn-sm" type="button" onclick="this.parentElement.remove()" style="flex-shrink:0;">✕</button>';
+    container.appendChild(div);
+}
+
+function selectSubIcon(el, iconId, css) {
+    const grid = el.closest('.sub-icon-grid');
+    grid.querySelectorAll('[data-icon-id]').forEach(function(i) { i.style.background = ''; });
+    el.style.background = '#e8f5e9';
+    const preview = grid.parentElement.querySelector('.sub-icon-preview i');
+    if (preview) preview.className = css;
+    const hiddenInput = grid.parentElement.parentElement.querySelector('.sub-acct-icon');
+    if (hiddenInput) hiddenInput.value = iconId;
+    setTimeout(function() { grid.style.display = 'none'; }, 200);
+}
+
+function getSubAccountData() {
+    const rows = document.querySelectorAll('#subAccountInputs > div');
+    const result = [];
+    rows.forEach(function(row) {
+        const nameInput = row.querySelector('.sub-acct-name');
+        const name = nameInput ? nameInput.value.trim() : '';
+        if (!name) return;
+        const iconInput = row.querySelector('.sub-acct-icon');
+        const colorInput = row.querySelector('.sub-acct-color');
+        result.push({
+            name: name,
+            icon: iconInput ? iconInput.value : '1',
+            color: colorInput ? colorInput.value : 'ff6b22',
+        });
+    });
+    return result;
+}
+
+function renderUserCheckboxes(selectedUserIds) {
+    const container = document.getElementById('userCheckboxes');
+    const selected = new Set(selectedUserIds || []);
+    let html = '';
+    for (const user of _allUsers) {
+        const checked = selected.has(user.code) ? ' checked' : '';
+        html += '<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;font-size:13px;">';
+        html += '  <input type="checkbox" class="user-cb" value="' + user.code + '"' + checked + ' style="width:14px;height:14px;">';
+        html += '  ' + escapeHtml(user.name);
+        html += '</label>';
+    }
+    container.innerHTML = html || '<span style="color:#999;font-size:13px;">暂无可用用户</span>';
+}
+
+function getSelectedUsers() {
+    const cbs = document.querySelectorAll('.user-cb:checked');
+    return Array.from(cbs).map(cb => {
+        const user = _allUsers.find(u => u.code === cb.value);
+        return user ? {user_code: user.code, user_name: user.name} : null;
+    }).filter(Boolean);
+}
+
+async function loadAccountIcons() {
+    try {
+        const resp = await fetch('/api/icons/account');
+        const data = await resp.json();
+        if (data.success) _accountIcons = data.icons || [];
+    } catch(e) {}
+}
+
+function renderIconGrid(selectedId) {
+    const grid = document.getElementById('iconGrid');
+    if (!_accountIcons.length) { grid.innerHTML = ''; return; }
+    let html = '';
+    for (const icon of _accountIcons) {
+        const sel = icon.id === (selectedId || '1') ? ' selected' : '';
+        html += '<div class="icon-item' + sel + '" data-icon-id="' + icon.id + '" onclick="selectAcctIcon(this, \'' + icon.id + '\')">';
+        html += '<i class="icon-preview ' + icon.css + '"></i>';
+        html += '<span class="icon-label">' + (icon.name || '') + '</span></div>';
+    }
+    grid.innerHTML = html;
+}
+
+function selectAcctIcon(el, iconId) {
+    document.querySelectorAll('#iconGrid .icon-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('formIcon').value = iconId;
+}
+
+function renderAcctColorGrid(selectedId) {
+    const grid = document.getElementById('colorGrid');
+    let html = '';
+    for (const c of _acctColors) {
+        const sel = c.id === (selectedId || 'ff6b22') ? ' selected' : '';
+        const isWhite = c.id === 'ffffff';
+        html += '<div class="color-item' + sel + '" style="background:#' + c.id + ';' + (isWhite ? 'border:2px solid #ddd;' : '') + '" title="' + c.name + '" onclick="selectAcctColor(this, \'' + c.id + '\')"></div>';
+    }
+    grid.innerHTML = html;
+}
+
+function selectAcctColor(el, colorId) {
+    document.querySelectorAll('#colorGrid .color-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('formColor').value = colorId;
+}
+
+async function loadAccounts() {
+    const container = document.getElementById('account-container');
+    try {
+        const [respAcc, respBind] = await Promise.all([
+            fetch('/api/accounts'),
+            fetch('/api/user-account'),
+        ]);
+        const dataAcc = await respAcc.json();
+        const dataBind = await respBind.json();
+        if (!dataAcc.success) {
+            container.innerHTML = '<div class="error-msg">❌ ' + escapeHtml(dataAcc.message) + '</div>';
+            return;
+        }
+        const accounts = dataAcc.data || [];
+        const bindings = dataBind.success ? (dataBind.bindings || []) : [];
+        // account_id → [user_name]
+        const bindingMap = {};
+        for (const b of bindings) {
+            if (!bindingMap[b.account_id]) bindingMap[b.account_id] = [];
+            bindingMap[b.account_id].push(b.user_name);
+        }
+        let html = '<div class="toolbar"><button class="btn btn-primary" onclick="showAddModal()">➕ 新增账户</button></div>';
+        if (accounts.length === 0) {
+            html += '<div class="empty-msg">暂无账户</div>';
+        } else {
+            html += '<div class="card">';
+            for (const acc of accounts) {
+                const color = acc.color || 'ff6b22';
+                const iconId = acc.icon || '1';
+                const iconMap = _accountIcons.find(i => i.id === iconId);
+                const iconCss = iconMap ? iconMap.css : 'las la-wallet';
+                const balance = (acc.balance || 0) / 100;
+                const currency = acc.currency || 'CNY';
+                const subs = acc.subAccounts || [];
+                const boundUsers = bindingMap[acc.id] || [];
+                const catName = _accountCategories[acc.category]?.name || '其他';
+                const isLiability = [3, 9, 10].includes(acc.category);
+                html += '<div class="parent-row">';
+                html += '<span class="acct-name"><i class="' + iconCss + '" style="color:#' + color + ';"></i> ' + escapeHtml(acc.name) + (acc.hidden ? ' <span style="font-size:10px;color:#bbb;">👁️‍🗨️</span>' : '') + '</span>';
+                html += '<span class="acct-desc">' + catName + ' · ' + currency + (acc.comment ? ' · ' + escapeHtml(acc.comment) : '') + (boundUsers.length ? ' · 👥 ' + boundUsers.map(t => escapeHtml(t)).join(',') : '') + '</span>';
+                html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(balance) + '</span>';
+                html += '<span class="actions">';
+                html += `<button class="btn btn-outline btn-sm" onclick="showEditModal('${acc.id}')" title="编辑">✏️</button>`;
+                if (subs.length === 0) {
+                html += `<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${acc.id}','${escapeHtml(acc.name)}')" title="绑定用户">👥</button>`;
+                }
+                html += `<button class="btn btn-outline btn-sm" onclick="showAddSubAccountModal('${acc.id}','${escapeHtml(acc.name)}')" title="添加子账户">➕</button>`;
+                html += `<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${acc.id}','${escapeHtml(acc.name)}')">🗑️</button>`;
+                html += '</span>';
+                html += '</div>';
+                if (subs.length > 0) {
+                    for (const sub of subs) {
+                        const sb = (sub.balance || 0) / 100;
+                        const subUsers = bindingMap[sub.id] || [];
+                        const sc = sub.color || 'ff6b22';
+                        const si = sub.icon || '1';
+                        const sIconMap = _accountIcons.find(i => i.id === si);
+                        const sCss = sIconMap ? sIconMap.css : 'las la-circle';
+                        html += '<div class="child-item">';
+                        html += '<span class="name"><span class="sub-dot">└─</span> <i class="' + sCss + '" style="color:#' + sc + ';width:16px;text-align:center;font-size:13px;"></i> ' + escapeHtml(sub.name) + (subUsers.length ? ' <span style="font-size:10px;color:#aaa;">👥' + subUsers.join(',') + '</span>' : '') + '</span>';
+                        html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(sb) + '</span>';
+                        html += '<span class="actions">';
+                        html += `<button class="btn btn-outline btn-sm" onclick="showEditModal('${sub.id}')">✏️</button>`;
+                        html += `<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${sub.id}','${escapeHtml(sub.name)}')" title="绑定用户">👥</button>`;
+                        html += `<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${sub.id}','${escapeHtml(sub.name)}')">🗑️</button>`;
+                        html += '</span>';
+                        html += '</div>';
+                    }
+                }
+            }
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function getAccountTypeLabel(category) {
+    return _accountCategories[category]?.name || '其他';
+}
+
+function fmt(num) {
+    return '¥' + Number(num).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+// ── Modal ──
+function showAddSubAccountModal(parentId, parentName) {
+    showAddModal(parentId, parentName);
+}
+
+let _bindAccountId = '';
+
+function showBindUserModal(accountId, accountName) {
+    _bindAccountId = accountId;
+    document.getElementById('bindTitle').textContent = '绑定用户 - ' + accountName;
+    // 加载绑定列表
+    fetch('/api/user-account?account_id=' + accountId)
+        .then(r => r.json())
+        .then(data => {
+            const bound = data.success ? (data.bindings || []).map(b => b.user_code) : [];
+            if (!_allUsers.length) { loadUsers().then(() => renderBindList(bound)); }
+            else { renderBindList(bound); }
+        })
+        .catch(() => { renderBindList([]); });
+    document.getElementById('bindModal').classList.add('active');
+}
+
+function renderBindList(selectedIds) {
+    const container = document.getElementById('bindUserList');
+    const sel = new Set(selectedIds || []);
+    let html = '<div style="font-size:11px;color:#999;margin-bottom:4px;">选择要绑定的用户：</div>';
+    for (const user of _allUsers) {
+        const checked = sel.has(user.code) ? ' checked' : '';
+        html += '<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:13px;">';
+        html += '<input type="checkbox" class="bind-user-cb" value="' + user.code + '" data-name="' + escapeHtml(user.name) + '"' + checked + '>';
+        html += escapeHtml(user.name) + '</label>';
+    }
+    container.innerHTML = html || '<div style="font-size:12px;color:#bbb;padding:8px;">暂无用户</div>';
+}
+
+function closeBindModal() {
+    document.getElementById('bindModal').classList.remove('active');
+    _bindAccountId = '';
+}
+
+let _pendingBindings = null;
+
+async function confirmBind() {
+    if (!_bindAccountId) return;
+    const cbs = document.querySelectorAll('.bind-user-cb:checked');
+    const bindings = Array.from(cbs).map(cb => ({
+        user_code: cb.value,
+        user_name: cb.dataset.name || cb.value,
+    }));
+    _pendingBindings = bindings;
+    await doSaveBindings(bindings, false);
+}
+
+async function doSaveBindings(bindings, confirmed) {
+    if (!_bindAccountId) return;
+    try {
+        const resp = await fetch('/api/user-account/save', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({account_id: _bindAccountId, bindings: bindings, confirmed: confirmed}),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('✅ 绑定已保存', 'success');
+            closeBindModal();
+            loadAccounts();
+        } else if (data.needs_confirm) {
+            // 有用户将该账户设为默认账户，弹出自定义二次确认框
+            const conflictLines = data.conflicts.map(function(c) {
+                return '• ' + c.user_code + '（' + c.directions.join('、') + '）';
+            }).join('<br>');
+            document.getElementById('unbindConfirmBody').innerHTML =
+                '以下用户将该账户设为默认账户，解绑后将清空其默认账户设置：<br><br>'
+                + '<div style="background:#fff8e1;padding:10px 14px;border-radius:6px;font-size:13px;">'
+                + conflictLines + '</div>';
+            document.getElementById('unbindConfirmModal').classList.add('active');
+        } else {
+            showToast('❌ ' + data.message, 'error');
+        }
+    } catch(e) {
+        showToast('❌ 保存失败: ' + e.message, 'error');
+    }
+}
+
+function closeUnbindConfirmModal() {
+    document.getElementById('unbindConfirmModal').classList.remove('active');
+}
+
+async function confirmUnbind() {
+    document.getElementById('unbindConfirmModal').classList.remove('active');
+    if (_pendingBindings) {
+        await doSaveBindings(_pendingBindings, true);
+    }
+}
+
+async function showAddModal(parentId, parentName) {
+    _EDITING_ID = null;
+    const isSub = parentId && parentId !== '0';
+    document.getElementById('formTitle').textContent = isSub ? '添加子账户 - ' + parentName : '新增账户';
+    document.getElementById('formId').value = '';
+    document.getElementById('formParentId').value = parentId || '0';
+    document.getElementById('formName').value = '';
+    document.getElementById('formIcon').value = '1';
+    renderIconGrid('1');
+    document.getElementById('formColor').value = 'ff6b22';
+    renderAcctColorGrid('ff6b22');
+    document.getElementById('formCategory').innerHTML = getCategorySelect(5);
+    document.getElementById('formCurrency').value = 'CNY';
+    document.getElementById('formComment').value = '';
+    document.getElementById('formHidden').checked = false;
+
+    document.getElementById('formSubmitBtn').textContent = isSub ? '添加' : '创建';
+    document.getElementById('formModal').classList.add('active');
+    setTimeout(() => document.getElementById('formName').focus(), 100);
+}
+
+async function showEditModal(accountId) {
+    try {
+        const resp = await fetch('/api/accounts');
+        const data = await resp.json();
+        if (!data.success) { showToast('❌ ' + data.message, 'error'); return; }
+        const accounts = data.data || [];
+        let acc = null;
+        function find(arr) {
+            for (const a of arr) {
+                if (String(a.id) === accountId) { acc = a; return true; }
+                if (a.subAccounts) { for (const s of a.subAccounts) { if (String(s.id) === accountId) { acc = s; return true; } } }
+            }
+            return false;
+        }
+        if (!find(accounts)) { showToast('❌ 未找到该账户', 'error'); return; }
+
+        _EDITING_ID = accountId;
+        document.getElementById('formTitle').textContent = '编辑账户';
+        document.getElementById('formId').value = accountId;
+        document.getElementById('formName').value = acc.name || '';
+        document.getElementById('formIcon').value = acc.icon || '1';
+        renderIconGrid(acc.icon || '1');
+        document.getElementById('formColor').value = acc.color || 'ff6b22';
+        renderAcctColorGrid(acc.color || 'ff6b22');
+        document.getElementById('formCategory').innerHTML = getCategorySelect(acc.category || 5);
+        document.getElementById('formCurrency').value = acc.currency || 'CNY';
+        document.getElementById('formComment').value = acc.comment || '';
+        document.getElementById('formHidden').checked = acc.hidden === true;
+        document.getElementById('formHiddenField').style.display = 'block';
+        // 确保用户列表已加载
+        if (!_allUsers.length) await loadUsers();
+        document.getElementById('formSubmitBtn').textContent = '保存';
+        document.getElementById('formModal').classList.add('active');
+        setTimeout(() => document.getElementById('formName').focus(), 100);
+    } catch(e) {
+        showToast('❌ 加载失败: ' + e.message, 'error');
+    }
+}
+
+function closeFormModal() {
+    document.getElementById('formModal').classList.remove('active');
+    _EDITING_ID = null;
+}
+
+async function submitForm() {
+    const name = document.getElementById('formName').value.trim();
+    if (!name) { showToast('请输入账户名称', 'error'); return; }
+    const btn = document.getElementById('formSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+    try {
+        const comment = document.getElementById('formComment').value.trim();
+        if (_EDITING_ID) {
+            const category = parseInt(document.getElementById('formCategory').value);
+            const resp = await fetch('/api/accounts/modify', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    id: _EDITING_ID,
+                    name: name,
+                    category: category,
+                    icon: document.getElementById('formIcon').value,
+                    color: document.getElementById('formColor').value,
+                    comment: comment,
+                    hidden: document.getElementById('formHidden').checked,
+                }),
+            });
+            const result = await resp.json();
+            if (result.success || result.message === '未检测到变更') {
+                showToast('✅ 账户已更新', 'success'); closeFormModal(); loadAccounts();
+            } else { showToast('❌ ' + result.message, 'error'); }
+        } else {
+            const category = parseInt(document.getElementById('formCategory').value);
+            const parentId = document.getElementById('formParentId').value;
+            const resp = await fetch('/api/accounts/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: name,
+                    category: category,
+                    icon: document.getElementById('formIcon').value,
+                    color: document.getElementById('formColor').value,
+                    currency: document.getElementById('formCurrency').value.trim().toUpperCase() || 'CNY',
+                    comment: comment,
+                    parent_id: parentId,
+                }),
+            });
+            const result = await resp.json();
+            if (result.success) {
+                showToast('✅ 账户已创建', 'success'); closeFormModal(); loadAccounts();
+            } else { showToast('❌ ' + result.message, 'error'); }
+        }
+    } catch (e) {
+        showToast('❌ 操作失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = _EDITING_ID ? '保存' : '创建';
+    }
+}
+
+// ── Delete ──
+function showDeleteModal(id, name) {
+    _DELETE_ID = id;
+    document.getElementById('deleteName').textContent = name;
+    document.getElementById('deleteModal').classList.add('active');
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.remove('active');
+    _DELETE_ID = null;
+}
+
+async function confirmDelete() {
+    if (!_DELETE_ID) return;
+    const btn = document.getElementById('deleteSubmitBtn');
+    btn.disabled = true; btn.textContent = '删除中...';
+    try {
+        const resp = await fetch('/api/accounts/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: _DELETE_ID}),
+        });
+        const result = await resp.json();
+        if (result.success) { showToast('✅ 账户已删除', 'success'); closeDeleteModal(); loadAccounts(); }
+        else { showToast('❌ ' + result.message, 'error'); }
+    } catch (e) {
+        showToast('❌ 删除失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = '删除';
+    }
+}
+
+loadAccountCategories();
+loadAccountIcons();
+loadAccounts();
+{% endblock %}

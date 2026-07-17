@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+venv/
+.venv/
+
+# Docker compose（含敏感配置，排除样本）
+docker-compose.yml
+
+# Logs
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# Database
+*.db
+
+# Test / temp
+account_test.json
+tests/

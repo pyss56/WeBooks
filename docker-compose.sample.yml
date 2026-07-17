@@ -1,0 +1,46 @@
+networks:
+  bookkeeping-network:
+    driver: bridge
+
+services:
+  webooks:
+    image: pyss56/webooks:latest
+    container_name: webooks
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      - /path/to/webooks/data:/app/data
+      - /path/to/webooks/logs:/app/logs
+    networks:
+      - bookkeeping-network
+    environment:
+      - TZ=Asia/Shanghai
+      # 日志级别
+      - LOG_LEVEL=INFO
+      # 日志保留天数（按小时轮转）
+      - LOG_RETENTION_DAYS=60
+      # Flask
+      - SECRET_KEY=your-secret-key-here
+      # 企业微信配置
+      - WECOM_CORP_ID=your_corp_id
+      - WECOM_AGENT_ID=your_agent_id
+      - WECOM_CORP_SECRET=your_corp_secret
+      - WECOM_TOKEN=your_token
+      - WECOM_ENCODING_AES_KEY=your_encoding_aes_key
+      - WECOM_AGENT_URL=your_agent_url
+      # 其他配置
+      - TIMEZONE=Asia/Shanghai
+      - WECOM_TO_USER=@all
+      # 管理员用户名和密码（用于登录管理后台）
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your_admin_password
+      # 服务外部访问地址（预算管理页面、汇总图表链接用）
+      - BASE_URL=http://your-domain:5001
+      # PC端访问入口编码（企业微信自建应用主页URL拼接用）
+      - WEB_ENTRY_CODE=
+      # 未带入口编码时的跳转地址
+      - WEB_ENTRY_REDIRECT=https://example.com
+      # 企业微信 OAuth 登录（汇总图表免验证码）
+      - WECOM_OAUTH_ENABLED=false
+

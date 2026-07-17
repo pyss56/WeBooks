@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>汇总详情</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .verify-box {
+            background: #fff; border-radius: 12px; padding: 40px;
+            max-width: 400px; margin: 60px auto;
+            box-shadow: 0 2px 12px rgba(0,0,0,.1); text-align: center;
+        }
+        .verify-box h2 { font-size: 18px; margin-bottom: 8px; }
+        .verify-box p { font-size: 13px; color: #888; margin-bottom: 20px; }
+        .verify-box input {
+            width: 120px; padding: 10px 14px; font-size: 24px; letter-spacing: 8px;
+            text-align: center; border: 2px solid #d9d9d9; border-radius: 8px;
+            outline: none; font-family: monospace;
+        }
+        .verify-box input:focus { border-color: #07c160; }
+        .verify-box .btn { margin-top: 16px; width: 100%; padding: 10px; font-size: 15px; }
+        .verify-box .error { color: #c62828; font-size: 13px; margin-top: 8px; display: none; }
+        .dashboard { display: none; }
+        .dashboard .header-card {
+            background: #fff; border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08);
+        }
+        .dashboard .header-card h1 { font-size: 18px; margin-bottom: 4px; }
+        .dashboard .header-card .meta { font-size: 12px; color: #999; }
+        .summary-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+        .summary-card {
+            background: #fff; border-radius: 10px; padding: 16px 20px;
+            flex: 1; min-width: 120px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08); text-align: center;
+        }
+        .summary-card .num { font-size: 22px; font-weight: 700; }
+        .summary-card .num.green { color: #2e7d32; }
+        .summary-card .num.red { color: #c62828; }
+        .summary-card .num.gray { color: #666; }
+        .summary-card .label { font-size: 12px; color: #888; margin-top: 4px; }
+        .view-toggle { display: flex; gap: 8px; margin-bottom: 16px; }
+        .view-toggle button {
+            padding: 6px 16px; border: 1px solid #d9d9d9; border-radius: 6px;
+            background: #fff; cursor: pointer; font-size: 13px;
+        }
+        .view-toggle button.active { background: #07c160; color: #fff; border-color: #07c160; }
+        .chart-section {
+            background: #fff; border-radius: 12px; padding: 20px 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px;
+        }
+        .chart-bar-row { margin-bottom: 12px; }
+        .chart-bar-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 4px; padding: 4px 0; cursor: pointer;
+        }
+        .chart-bar-name { font-size: 13px; font-weight: 600; color: #444; }
+        .chart-bar-nums { font-size: 12px; color: #888; }
+        .chart-bar-nums .num-spent { color: #2e7d32; font-weight: 600; }
+        .chart-bar-track {
+            height: 22px; background: #f0f0f0; border-radius: 11px;
+            overflow: hidden; position: relative;
+        }
+        .chart-bar-seg { height: 100%; transition: width 0.6s ease; }
+        .chart-bar-seg.used { background: linear-gradient(90deg, #66bb6a, #43a047); }
+        .chart-bar-seg.remaining { background: #e0e0e0; }
+        .chart-bar-seg.over { background: linear-gradient(90deg, #ef5350, #c62828); }
+        .chart-bar-label {
+            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+            font-size: 11px; font-weight: 600; color: #666;
+        }
+        .child-row { padding-left: 24px; display: none; }
+        .child-row.open { display: block; }
+        .empty-state { text-align: center; padding: 40px; color: #999; font-size: 14px; }
+    </style>
+</head>
+<body>
+{% if expired %}
+<div class="verify-box">
+    <h2>🔐 查看汇总详情</h2>
+    <p style="color:#c62828;">该汇总已超过7天可见期，已失效</p>
+</div>
+{% elif oauth_user %}
+<script>document.addEventListener('DOMContentLoaded', function() {
+    fetch('/api/summary/{{ uuid }}/data', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+    .then(r=>r.json()).then(d=>{ if(d.success&&d.has_data){ document.getElementById('verifyBox').style.display='none'; document.getElementById('dashboard').style.display='block'; renderDashboard(d); } });
+});</script>
+<div class="verify-box" id="verifyBox">
+    <h2>🔐 查看汇总详情</h2>
+    <p>✅ 已通过企业微信身份验证，正在加载...</p>
+</div>
+{% else %}
+<div class="verify-box" id="verifyBox">
+    <h2>🔐 查看汇总详情</h2>
+    <p id="verifyHint">请输入推送消息中的 4 位验证码</p>
+    <input type="text" id="verifyInput" maxlength="4" inputmode="numeric" pattern="\d*"
+           autocomplete="one-time-code" oninput="this.value=this.value.replace(/\D/g,'')"
+           onkeydown="if(event.key==='Enter') doVerify()">
+    <div class="error" id="verifyError">验证码错误</div>
+    <button class="btn btn-primary" onclick="doVerify()">查看详情</button>
+</div>
+{% endif %}
+
+<div class="dashboard" id="dashboard">
+    <div class="header-card">
+        <h1 id="pageTitle"></h1>
+        <div class="meta">{{ task_name }} · {{ executed_at }}</div>
+    </div>
+    <div class="summary-row" id="summaryRow"></div>
+    <div class="view-toggle">
+        <button class="active" data-level="parent" onclick="setLevel('parent')">一级科目</button>
+        <button data-level="child" onclick="setLevel('child')">二级科目</button>
+        <label style="margin-left:auto;font-size:13px;color:#888;display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" id="showBudgetCb" checked onchange="renderChart()"> 显示预算
+        </label>
+    </div>
+    <div id="chartContainer"></div>
+</div>
+
+<script>
+const UUID = '{{ uuid }}';
+let _chartData = [];
+let _currentLevel = 'parent';
+
+async function doVerify() {
+    const code = document.getElementById('verifyInput').value;
+    if (code.length !== 4) { showError('请输入4位验证码'); return; }
+    document.getElementById('verifyError').style.display = 'none';
+    try {
+        const resp = await fetch('/api/summary/' + UUID + '/data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({verification: code}),
+        });
+        const result = await resp.json();
+        if (!result.success) { showError(result.message || '验证失败'); return; }
+        if (!result.has_data) { showError(result.message || '暂无数据'); return; }
+        document.getElementById('verifyBox').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        renderDashboard(result);
+    } catch(e) { showError('请求失败: ' + e.message); }
+}
+
+function showError(msg) {
+    const el = document.getElementById('verifyError');
+    el.textContent = msg;
+    el.style.display = 'block';
+}
+
+function renderDashboard(data) {
+    document.getElementById('pageTitle').textContent = data.title || '汇总详情';
+    _chartData = data.chart_data || [];
+    const row = document.getElementById('summaryRow');
+    const totalBudget = data.total_budget || 0;
+    const totalExpense = data.total_expense || 0;
+    const remaining = totalBudget - totalExpense;
+    const pct = totalBudget > 0 ? (totalExpense / totalBudget * 100) : 0;
+    const showBgt = document.getElementById('showBudgetCb').checked;
+    row.innerHTML = `
+        <div class="summary-card"><div class="num green">${data.total_count}</div><div class="label">总笔数</div></div>
+        <div class="summary-card"><div class="num green">¥${totalExpense.toFixed(2)}</div><div class="label">总支出</div></div>
+        ${showBgt ? `
+        <div class="summary-card"><div class="num gray">¥${totalBudget.toFixed(2)}</div><div class="label">总预算</div></div>
+        <div class="summary-card"><div class="num ${remaining < 0 ? 'red' : 'green'}">¥${remaining.toFixed(2)}</div><div class="label">剩余</div></div>
+        <div class="summary-card"><div class="num ${remaining < 0 ? 'red' : 'gray'}">${pct.toFixed(2)}%</div><div class="label">已用占比</div></div>
+        ` : ''}
+    `;
+    renderChart();
+}
+
+function setLevel(level) {
+    _currentLevel = level;
+    document.querySelectorAll('.view-toggle button').forEach(b => {
+        b.classList.toggle('active', b.dataset.level === level);
+    });
+    renderChart();
+}
+
+function renderChart() {
+    const container = document.getElementById('chartContainer');
+    if (!_chartData.length) {
+        container.innerHTML = '<div class="empty-state">暂无科目数据</div>';
+        return;
+    }
+    let html = '<div class="chart-section">';
+
+    const showBudget = document.getElementById('showBudgetCb').checked;
+    // 不显示预算时只保留有支出的科目
+    const filteredData = showBudget ? _chartData : _chartData.filter(p => p.spent > 0 || (p.children && p.children.some(c => c.spent > 0)));
+    if (_currentLevel === 'child') {
+        // 二级科目：按一级科目分组显示子科目，不汇总数据
+        for (const p of filteredData) {
+            if (!p.children || !p.children.length) continue;
+            const children = showBudget ? p.children : p.children.filter(c => c.spent > 0);
+            if (!children.length) continue;
+            html += '<div style="font-size:13px;font-weight:700;color:#555;margin:16px 0 8px;padding-left:4px;">📁 ' + p.name + '</div>';
+            for (const c of children) {
+                const cpct = c.budget > 0 ? (c.spent / c.budget * 100) : (c.spent > 0 ? 100 : 0);
+                const cusedW = c.budget > 0 ? Math.min(cpct, 100) : (c.spent > 0 ? 100 : 0);
+                html += '<div class="chart-bar-row" style="padding-left:12px;">';
+                html += '<div class="chart-bar-header" style="cursor:default">';
+                html += '<div class="chart-bar-name" style="font-size:12px;">📄 ' + c.name + '</div>';
+                html += '<div class="chart-bar-nums"><span class="num-spent">¥' + c.spent.toFixed(2) + '</span>';
+                if (showBudget && c.budget > 0) html += ' · ' + cpct.toFixed(2) + '%';
+                html += '</div></div>';
+                html += '<div class="chart-bar-track child-track">';
+                html += '<div class="chart-bar-seg used" style="width:' + cusedW + '%"></div>';
+                html += '</div></div>';
+            }
+        }
+    } else {
+        // 一级科目：按一级汇总显示
+        for (const p of filteredData) {
+            const pct = p.budget > 0 ? (p.spent / p.budget * 100) : (p.spent > 0 ? 100 : 0);
+            const over = showBudget && p.spent > p.budget && p.budget > 0;
+            const usedW = showBudget && p.budget > 0 ? Math.min(pct, 100) : (p.spent > 0 ? 100 : 0);
+            const overW = over ? Math.min((p.spent - p.budget) / p.budget * 100, 100) : 0;
+            html += '<div class="chart-bar-row">';
+            html += '<div class="chart-bar-header" onclick="toggleChildren(\'' + p.id + '\')">';
+            html += '<div class="chart-bar-name">📁 ' + p.name + '</div>';
+            html += '<div class="chart-bar-nums"><span class="num-spent">¥' + p.spent.toFixed(2) + '</span>';
+            if (showBudget && p.budget > 0) {
+                html += ' / 预算 ¥' + p.budget.toFixed(2) + ' · ' + pct.toFixed(2) + '%';
+            } else if (showBudget) {
+                html += ' <span style="color:#999">（无预算）</span>';
+            }
+            html += '</div></div>';
+            html += '<div class="chart-bar-track">';
+            if (over) {
+                html += '<div class="chart-bar-seg used" style="width:100%"></div>';
+                html += '<div class="chart-bar-seg over" style="width:' + overW + '%"></div>';
+            } else {
+                html += '<div class="chart-bar-seg used" style="width:' + usedW + '%"></div>';
+                if (showBudget) html += '<div class="chart-bar-seg remaining" style="width:' + (100 - usedW) + '%"></div>';
+            }
+            if (p.spent > 0 && !over) {
+                html += '<span class="chart-bar-label">¥' + p.spent.toFixed(2) + '</span>';
+            }
+            html += '</div>';
+            if (p.children && p.children.length > 0) {
+                html += '<div class="child-row" id="children_' + p.id + '">';
+                for (const c of p.children) {
+                    const cpct = c.budget > 0 ? (c.spent / c.budget * 100) : (c.spent > 0 ? 100 : 0);
+                    const cusedW = c.budget > 0 ? Math.min(cpct, 100) : (c.spent > 0 ? 100 : 0);
+                    html += '<div class="chart-bar-row">';
+                    html += '<div class="chart-bar-header" style="cursor:default">';
+                    html += '<div class="chart-bar-name" style="font-weight:400;font-size:12px;">' + c.name + '</div>';
+                    html += '<div class="chart-bar-nums"><span class="num-spent">¥' + c.spent.toFixed(2) + '</span>';
+                    if (showBudget && c.budget > 0) html += ' · ' + cpct.toFixed(2) + '%';
+                    html += '</div></div>';
+                    html += '<div class="chart-bar-track child-track">';
+                    html += '<div class="chart-bar-seg used" style="width:' + cusedW + '%"></div>';
+                    html += '</div></div>';
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+    }
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function toggleChildren(id) {
+    const el = document.getElementById('children_' + id);
+    if (el) el.classList.toggle('open');
+}
+</script>
+</body>
+</html>

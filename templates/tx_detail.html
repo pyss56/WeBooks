@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>交易详情 - {{ app_name }}</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+  background: #f5f5f5;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  width: 100%;
+  max-width: 420px;
+  overflow: hidden;
+}
+.card-header {
+  padding: 24px 24px 16px;
+  text-align: center;
+  border-bottom: 1px solid #f0f0f0;
+}
+.card-header .icon { font-size: 40px; margin-bottom: 8px; display: block; }
+.card-header .type-label { font-size: 14px; color: #888; }
+.card-header .amount { font-size: 32px; font-weight: 700; margin-top: 4px; }
+.card-header .amount.income { color: #e4393c; }
+.card-header .amount.expense { color: #07c160; }
+.card-header .amount.transfer { color: #1a73e8; }
+.card-body { padding: 20px 24px; }
+.info-row {
+  display: flex; justify-content: space-between;
+  padding: 8px 0; font-size: 14px;
+  border-bottom: 1px solid #f5f5f5;
+}
+.info-row:last-child { border-bottom: none; }
+.info-row .label { color: #999; }
+.info-row .value { color: #333; text-align: right; max-width: 60%; word-break: break-all; }
+.card-footer {
+  padding: 16px 24px 20px; text-align: center;
+  border-top: 1px solid #f0f0f0; font-size: 12px; color: #ccc;
+}
+.msg-box { text-align: center; padding: 60px 24px; }
+.msg-box .big-icon { font-size: 48px; margin-bottom: 16px; display: block; }
+.msg-box p { font-size: 14px; line-height: 1.6; }
+.msg-box .sub { color: #999; margin-top: 8px; font-size: 13px; }
+.btn {
+  display: inline-block; padding: 10px 24px; border-radius: 8px;
+  font-size: 14px; text-decoration: none; color: #fff;
+  background: #07c160; margin-top: 16px; border: none; cursor: pointer;
+}
+.btn:hover { background: #06ad56; }
+.btn:disabled { background: #94dbb0; cursor: not-allowed; }
+.btn-outline { background: #fff; color: #333; border: 1px solid #d9d9d9 !important; }
+.btn-outline:hover { border-color: #07c160 !important; color: #07c160; }
+.btn-danger { background: #e4393c; color: #fff; border: none; }
+.btn-danger:hover { background: #d03033; }
+.btn-sm { padding: 6px 14px; font-size: 12px; margin-top: 0; }
+.action-bar { display: flex; justify-content: center; gap: 12px; padding: 0 24px 16px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+.field input, .field select {
+  width: 100%; padding: 8px 12px; border: 1px solid #d9d9d9;
+  border-radius: 8px; font-size: 14px; outline: none; font-family: inherit;
+}
+.field input:focus, .field select:focus { border-color: #07c160; }
+.edit-section { display: none; padding: 0 24px 20px; }
+.edit-section.active { display: block; }
+.edit-section h3 { font-size: 16px; margin-bottom: 16px; }
+.edit-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.toast {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  z-index: 2000; padding: 10px 24px; border-radius: 8px;
+  font-size: 14px; color: #fff; display: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.toast.success { background: #07c160; }
+.toast.error { background: #e4393c; }
+.toast.show { display: block; animation: fadeIn .3s; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+{% if error %}
+<div class="card">
+  <div class="msg-box">
+    <span class="big-icon">⚠️</span>
+    <p style="color:#e65100;">{{ error }}</p>
+  </div>
+</div>
+{% elif expired %}
+<div class="card">
+  <div class="msg-box">
+    <span class="big-icon">⏰</span>
+    <p>{{ expired }}</p>
+  </div>
+</div>
+{% elif deleted %}
+<div class="card">
+  <div class="msg-box">
+    <span class="big-icon">✅</span>
+    <p style="color:#07c160;">交易已删除</p>
+  </div>
+</div>
+{% else %}
+<!-- 验证码 -->
+<div class="card" id="verifyCard">
+  <div class="msg-box">
+    <span class="big-icon">🔐</span>
+    <p>请输入推送消息中的验证码</p>
+    <div style="margin:16px auto;max-width:140px;">
+      <input type="text" id="codeInput" maxlength="4" style="width:100%;padding:10px;font-size:24px;text-align:center;letter-spacing:6px;border:2px solid #d9d9d9;border-radius:8px;outline:none;font-family:monospace;" oninput="this.value=this.value.replace(/\D/g,'')" onkeydown="if(event.key==='Enter') doVerify()">
+    </div>
+    <div id="verifyError" style="color:#c62828;font-size:13px;display:none;margin-bottom:8px;"></div>
+    <button class="btn" onclick="doVerify()">查看交易</button>
+  </div>
+</div>
+<div class="card" id="txCard" style="display:none;">
+  <div id="displayMode"></div>
+  <div class="card-footer">{{ app_name }}</div>
+</div>
+
+<script>
+const TX_UUID = '{{ tx_uuid | e }}';
+function $(id) { return document.getElementById(id); }
+
+async function doVerify() {
+    const code = $('codeInput').value;
+    if (code.length !== 4) { $('verifyError').textContent = '请输入4位验证码'; $('verifyError').style.display = 'block'; return; }
+    $('verifyError').style.display = 'none';
+    try {
+        const resp = await fetch('/api/transactions/by-uuid?uuid=' + encodeURIComponent(TX_UUID) + '&code=' + code);
+        const result = await resp.json();
+        if (!result.success) {
+            $('verifyError').textContent = result.message || '验证失败';
+            $('verifyError').style.display = 'block';
+            return;
+        }
+        $('verifyCard').style.display = 'none';
+        renderTx(result.data);
+    } catch(e) {
+        $('verifyError').textContent = '请求失败: ' + e.message;
+        $('verifyError').style.display = 'block';
+    }
+}
+
+function renderTx(tx) {
+    const card = $('txCard');
+    card.style.display = 'block';
+    card.innerHTML = `
+    <div id="displayMode">
+        <div class="card-header">
+            <span class="icon">${tx.bill_type === 'income' ? '📥' : tx.bill_type === 'expense' ? '📤' : '🔄'}</span>
+            <div class="type-label">${tx.bill_type === 'income' ? '收入' : tx.bill_type === 'expense' ? '支出' : tx.to_account_name ? '转账' : ''}</div>
+            <div class="amount ${tx.to_account_name ? 'transfer' : tx.bill_type}">
+                ${tx.bill_type === 'income' ? '+' : tx.bill_type === 'expense' ? '-' : ''}¥${(tx.amount / 100).toFixed(2)}
+            </div>
+        </div>
+        <div class="card-body">
+            ${tx.category_name ? '<div class="info-row"><span class="label">科目</span><span class="value">' + tx.category_name + '</span></div>' : ''}
+            ${tx.account_name ? '<div class="info-row"><span class="label">' + (tx.to_account_name ? '转出账户' : '账户') + '</span><span class="value">' + tx.account_name + '</span></div>' : ''}
+            ${tx.to_account_name ? '<div class="info-row"><span class="label">转入账户</span><span class="value">' + tx.to_account_name + '</span></div>' : ''}
+            ${tx.comment ? '<div class="info-row"><span class="label">备注</span><span class="value">' + tx.comment + '</span></div>' : ''}
+            ${tx.transaction_time ? '<div class="info-row"><span class="label">交易时间</span><span class="value">' + tx.transaction_time + '</span></div>' : ''}
+            <div class="info-row"><span class="label">创建时间</span><span class="value">' + tx.created_at + '</span></div>
+        </div>
+    </div>`;
+}
+
+function $(id) { return document.getElementById(id); }
+function showToast(msg, type) {
+  var t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function() { t.classList.remove('show'); }, 3000);
+}
+function showEdit() {
+  $('displayMode').style.display = 'none';
+  $('editBtn').style.display = 'none';
+  $('editMode').classList.add('active');
+}
+
+function loadAccounts(sel, selectedId) {
+  fetch('/api/transactions/by-uuid/accounts?uuid=' + encodeURIComponent(TX_UUID))
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+      sel.innerHTML = '<option value="">-- 不修改 --</option>';
+      if (result.success && result.data) {
+        result.data.forEach(function(a) {
+          var opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = a._display_name || a.name;
+          if (String(a.id) === String(selectedId)) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }
+      sel.disabled = false;
+    })
+    .catch(function() {
+      sel.innerHTML = '<option value="">加载失败</option>';
+      sel.disabled = false;
+    });
+}
+function cancelEdit() {
+  $('editMode').classList.remove('active');
+  $('displayMode').style.display = '';
+  $('editBtn').style.display = '';
+}
+async function saveEdit() {
+  var btn = $('saveBtn');
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    var body = {
+      uuid: TX_UUID,
+      amount: parseFloat($('editAmount').value) || 0,
+      comment: $('editComment').value.trim(),
+      transaction_time: $('editTime').value.trim(),
+    };
+    // 非转账才提交科目
+    var catVal = $('editCategory');
+    if (catVal) body.category_name = catVal.value;
+    // 转出账户
+    var acctId = $('editAccount').value;
+    if (acctId) {
+      body.account_id = acctId;
+      var acctSel = $('editAccount');
+      var selectedOpt = acctSel.options[acctSel.selectedIndex];
+      if (selectedOpt) body.account_name = selectedOpt.textContent;
+    }
+    // 转入账户（转账时）
+    var toAcctSel = $('editToAccount');
+    if (toAcctSel) {
+      var toId = toAcctSel.value;
+      if (toId) {
+        body.to_account_id = toId;
+        var selectedToOpt = toAcctSel.options[toAcctSel.selectedIndex];
+        if (selectedToOpt) body.to_account_name = selectedToOpt.textContent;
+      }
+    }
+    var resp = await fetch('/api/transactions/by-uuid/update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast('✅ ' + result.message, 'success');
+      setTimeout(function() { location.reload(); }, 1000);
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('❌ 保存失败', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '保存';
+  }
+}
+function confirmDelete() {
+  if (!confirm('确定要删除此账单？删除后不可恢复。')) return;
+  var btn = $('deleteBtn');
+  btn.disabled = true; btn.textContent = '删除中...';
+  fetch('/api/transactions/by-uuid/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({uuid: TX_UUID}),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+      if (result.success) {
+        $('txCard').innerHTML =
+          '<div class="msg-box"><span class="big-icon">✅</span><p style="color:#07c160;">交易已删除</p></div>';
+      } else {
+        showToast('❌ ' + result.message, 'error');
+        btn.disabled = false; btn.textContent = '🗑️ 删除';
+      }
+    })
+    .catch(function() {
+      showToast('❌ 删除失败', 'error');
+      btn.disabled = false; btn.textContent = '🗑️ 删除';
+    });
+}
+</script>
+{% endif %}
+
+</body>
+</html>

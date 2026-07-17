@@ -1,0 +1,20 @@
+[
+  {"id":"1","css":"las la-wallet","emoji":"👛","name":"钱包"},
+  {"id":"100","css":"las la-credit-card","emoji":"💳","name":"信用卡"},
+  {"id":"110","css":"las la-piggy-bank","emoji":"🐷","name":"储蓄"},
+  {"id":"111","css":"las la-coins","emoji":"🪙","name":"硬币"},
+  {"id":"200","css":"las la-sack-dollar","emoji":"💰","name":"钱袋"},
+  {"id":"300","css":"las la-building","emoji":"🏦","name":"银行"},
+  {"id":"310","css":"las la-university","emoji":"🏛️","name":"银行大楼"},
+  {"id":"400","css":"las la-hand-holding-usd","emoji":"🤝","name":"理财"},
+  {"id":"500","css":"las la-chart-pie","emoji":"📊","name":"投资"},
+  {"id":"510","css":"las la-chart-line","emoji":"📈","name":"基金"},
+  {"id":"600","css":"las la-file-invoice-dollar","emoji":"📄","name":"贷款"},
+  {"id":"700","css":"las la-hand-holding-heart","emoji":"💝","name":"爱心账户"},
+  {"id":"800","css":"las la-robot","emoji":"🤖","name":"自动"},
+  {"id":"900","css":"las la-mobile-alt","emoji":"📱","name":"手机银行"},
+  {"id":"910","css":"las la-weixin","emoji":"💬","name":"微信支付"},
+  {"id":"911","css":"lab la-alipay","emoji":"💳","name":"支付宝"},
+  {"id":"920","css":"las la-exchange-alt","emoji":"🔄","name":"转账"},
+  {"id":"980","css":"las la-credit-card","emoji":"💳","name":"贷记卡"}
+]

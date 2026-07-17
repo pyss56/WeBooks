@@ -1,0 +1,555 @@
+{% extends "base.html" %}
+{% block title %}科目管理{% endblock %}
+{% block nav_category %}active{% endblock %}
+
+{% block extra_style %}
+.header-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.header-card h1 { font-size: 20px; color: #07c160; }
+.header-card .info { font-size: 13px; color: #999; }
+.tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.tab {
+    flex: 1;
+    padding: 12px 16px;
+    text-align: center;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    background: #fff;
+    color: #666;
+    transition: all .2s;
+    border-bottom: 2px solid transparent;
+}
+.tab:hover { color: #07c160; background: #f6ffed; }
+.tab.active { color: #07c160; font-weight: 600; border-bottom-color: #07c160; background: #f6ffed; }
+.toolbar {
+    background: #fff;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.parent-row {
+    background: #fafafa;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 2px solid #e8e8e8;
+    font-weight: 600;
+    font-size: 14px;
+}
+.parent-row .cat-name { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.parent-row .cat-desc {
+    font-size: 11px; color: #999; font-weight: 400;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.parent-row .actions { margin-left: auto; display: flex; gap: 6px; }
+.parent-row, .child-item { cursor: grab; }
+.parent-row.dragging, .child-item.dragging { opacity: 0.4; }
+.parent-row.drag-over, .child-item.drag-over { border-top: 2px solid #07c160 !important; }
+.drag-handle { cursor: grab; color: #ccc; font-size: 14px; user-select: none; }
+.drag-handle:hover { color: #999; }
+.child-list { padding: 0; }
+.child-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px 8px 36px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+    color: #555;
+    transition: background .2s;
+}
+.child-item:hover { background: #fafcff; }
+.child-item:last-child { border-bottom: none; }
+.child-item .name { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.child-item .desc {
+    font-size: 11px; color: #bbb; font-weight: 400;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.child-item .name .sub-dot { color: #ccc; margin-right: 6px; }
+.child-item .actions { margin-left: auto; display: flex; gap: 6px; }
+.empty-msg { padding: 40px 24px; text-align: center; color: #999; font-size: 14px; }
+.level-badge { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+.level-badge.l1 { background: #e6f7ff; color: #1890ff; }
+.level-badge.l2 { background: #f6ffed; color: #52c41a; }
+{% endblock %}
+
+{% block content %}
+<div class="header-card">
+    <div>
+        <h1>📂 科目管理</h1>
+        <div class="info">管理交易科目，支持支出、收入、转账三大类别</div>
+    </div>
+</div>
+
+<div class="tabs" id="tabHeaders">
+    <button class="tab active" data-type="expense" onclick="switchTab('expense')">💸 支出</button>
+    <button class="tab" data-type="income" onclick="switchTab('income')">💰 收入</button>
+</div>
+
+<div class="toolbar">
+    <span id="tabInfo" style="font-size:13px;color:#999;"></span>
+    <button class="btn btn-primary" onclick="openAddModal()">➕ 新增科目</button>
+</div>
+
+<div class="card" id="categoryList"></div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="formModal">
+    <div class="modal">
+        <h3 id="formTitle">新增科目</h3>
+        <div class="field">
+            <label>科目名称</label>
+            <input type="text" id="formName" placeholder="请输入科目名称" maxlength="20">
+        </div>
+        <div class="field">
+            <label>科目图标</label>
+            <div class="icon-grid" id="iconGrid"></div>
+            <input type="hidden" id="formIcon" value="1">
+        </div>
+        <div class="field">
+            <label>颜色</label>
+            <div class="color-grid" id="colorGrid"></div>
+            <input type="hidden" id="formColor" value="ff6b22">
+        </div>
+        <div class="field" id="formParentField">
+            <label>所属父科目</label>
+            <select id="formParent"></select>
+        </div>
+        <div class="field">
+            <label>描述</label>
+            <textarea id="formComment" placeholder="可选：添加备注说明" maxlength="200"></textarea>
+        </div>
+        <div class="field" id="formHiddenField" style="display:none;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <input type="checkbox" id="formHidden" style="width:16px;height:16px;">
+                <span>隐藏此科目（在记账时不可见）</span>
+            </label>
+        </div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeFormModal()">取消</button>
+            <button class="btn btn-primary" id="formSubmitBtn" onclick="submitForm()">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal">
+        <h3>确认删除</h3>
+        <p style="font-size:14px;color:#666;margin-bottom:12px;">确定要删除科目 <strong id="deleteName"></strong> 吗？</p>
+        <p style="font-size:12px;color:#e4393c;margin-bottom:16px;">⚠️ 如果该科目已被交易使用，将无法删除</p>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeDeleteModal()">取消</button>
+            <button class="btn btn-danger" id="deleteSubmitBtn" onclick="confirmDelete()">删除</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+let CURRENT_TYPE = 'expense';
+let ALL_CATEGORIES = [];
+let CATEGORY_MAP = {};
+let EDITING_ID = null;
+let DELETING_ID = null;
+
+const TYPE_LABELS = {income: '收入', expense: '支出'};
+const TYPE_ICONS = {income: '💰', expense: '💸'};
+
+async function loadCategories() {
+    try {
+        const resp = await fetch('/api/categories/list');
+        const result = await resp.json();
+        if (result.success) {
+            ALL_CATEGORIES = result.categories;
+            CATEGORY_MAP = {};
+            function walk(items) {
+                for (const item of items) {
+                    CATEGORY_MAP[item.id] = item;
+                    if (item.subCategories) walk(item.subCategories);
+                }
+            }
+            walk(ALL_CATEGORIES);
+            renderTab(CURRENT_TYPE);
+        } else {
+            showToast('❌ ' + result.message, 'error');
+        }
+    } catch (e) {
+        showToast('❌ 加载失败: ' + e.message, 'error');
+    }
+}
+
+function getCategoriesByType(type) {
+    return ALL_CATEGORIES.filter(c => c.type === type);
+}
+
+function renderTab(type) {
+    CURRENT_TYPE = type;
+    const cats = getCategoriesByType(type);
+    document.getElementById('tabInfo').textContent = TYPE_ICONS[type] + ' ' + TYPE_LABELS[type] + '科目（共 ' + countAll(cats) + ' 个）';
+    const container = document.getElementById('categoryList');
+    let html = '';
+    if (cats.length === 0) {
+        html = '<div class="empty-msg">暂无' + TYPE_LABELS[type] + '科目，点击上方按钮新增</div>';
+    } else {
+        for (const parent of cats) {
+            const subs = parent.subCategories || [];
+            const pc = parent.color || 'ff6b22';
+            const pi = parent.icon || '1';
+            const pIconMap = ALL_ICONS.find(i => i.id === pi);
+            const pCss = pIconMap ? pIconMap.css : 'las la-folder';
+            html += '<div class="parent-row" data-cat-id="' + parent.id + '" draggable="true" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)">';
+            html += '<span class="drag-handle">⠿</span>';
+            html += '<span class="cat-name"><i class="' + pCss + '" style="color:#' + pc + ';width:18px;text-align:center;"></i> ' + parent.name + ' <span class="level-badge l1">一级</span>' + (parent.hidden ? '<span style="font-size:10px;color:#bbb;margin-left:4px;">👁️‍🗨️ 隐藏</span>' : '') + '</span>';
+            if (parent.comment) html += '<span class="cat-desc">📝 ' + escapeHtml(parent.comment) + '</span>';
+            html += '<div class="actions">';
+            html += '<button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + parent.id + '\')">✏️</button>';
+            html += '<button class="btn btn-danger btn-sm" onclick="openDeleteModal(\'' + parent.id + '\')">🗑️</button>';
+            html += '</div></div>';
+            if (subs.length > 0) {
+                html += '<div class="child-list">';
+                for (const child of subs) {
+                    const cc = child.color || 'ff6b22';
+                    const ci = child.icon || '1';
+                    const cIconMap = ALL_ICONS.find(i => i.id === ci);
+                    const cCss = cIconMap ? cIconMap.css : 'las la-circle';
+                    html += '<div class="child-item" data-cat-id="' + child.id + '" draggable="true" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)">';
+                    html += '<div class="name"><span class="sub-dot">└─</span> <span class="drag-handle" style="margin-right:4px;">⠿</span><i class="' + cCss + '" style="color:#' + cc + ';width:16px;text-align:center;font-size:13px;"></i> ' + child.name + ' <span class="level-badge l2">二级</span>' + (child.hidden ? '<span style="font-size:10px;color:#bbb;margin-left:4px;">👁️‍🗨️ 隐藏</span>' : '') + '</div>';
+                    if (child.comment) html += '<span class="desc">📝 ' + escapeHtml(child.comment) + '</span>';
+                    html += '<div class="actions">';
+                    html += '<button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + child.id + '\')">✏️</button>';
+                    html += '<button class="btn btn-danger btn-sm" onclick="openDeleteModal(\'' + child.id + '\')">🗑️</button>';
+                    html += '</div></div>';
+                }
+                html += '</div>';
+            }
+        }
+    }
+    container.innerHTML = html;
+}
+
+function countAll(cats) {
+    let count = 0;
+    for (const c of cats) { count++; if (c.subCategories) count += c.subCategories.length; }
+    return count;
+}
+
+function switchTab(type) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector('.tab[data-type="' + type + '"]').classList.add('active');
+    renderTab(type);
+}
+
+function getParentOptions(type, excludeId, forEdit) {
+    const cats = getCategoriesByType(type);
+    let html = '';
+    if (!forEdit) {
+        html += '<option value="0">作为一级科目</option>';
+    }
+    for (const parent of cats) {
+        if (parent.id === excludeId) continue;
+        html += '<option value="' + parent.id + '">' + parent.name + '（一级）</option>';
+        const subs = parent.subCategories || [];
+        for (const child of subs) {
+            if (child.id === excludeId) continue;
+            html += '<option value="' + child.id + '">└─ ' + child.name + '（二级）</option>';
+        }
+    }
+    return html;
+}
+
+let ALL_ICONS = [];
+
+const ALL_COLORS = [
+    {id: 'ff6b22', name: '橙色'},
+    {id: 'ff9500', name: '琥珀'},
+    {id: 'ff2d55', name: '红色'},
+    {id: 'e4393c', name: '朱红'},
+    {id: '4cd964', name: '绿色'},
+    {id: '07c160', name: '草绿'},
+    {id: 'cddc39', name: '黄绿'},
+    {id: '009688', name: '青色'},
+    {id: '2196f3', name: '蓝色'},
+    {id: '1a73e8', name: '深蓝'},
+    {id: '673ab7', name: '紫色'},
+    {id: '8e8e93', name: '灰色'},
+    {id: '000000', name: '黑色'},
+    {id: 'ffffff', name: '白色'},
+];
+
+async function loadIcons() {
+    try {
+        const resp = await fetch('/api/icons/category');
+        const data = await resp.json();
+        if (data.success) ALL_ICONS = data.icons || [];
+    } catch(e) {}
+}
+
+function renderColorGrid(selectedId) {
+    const grid = document.getElementById('colorGrid');
+    let html = '';
+    for (const c of ALL_COLORS) {
+        const sel = c.id === (selectedId || 'ff6b22') ? ' selected' : '';
+        const isWhite = c.id === 'ffffff';
+        html += '<div class="color-item' + sel + '" style="background:#' + c.id + ';' + (isWhite ? 'border:2px solid #ddd;' : '') + '" title="' + c.name + '" onclick="selectColor(this, \'' + c.id + '\')"></div>';
+    }
+    grid.innerHTML = html;
+}
+
+function selectColor(el, colorId) {
+    document.querySelectorAll('.color-grid .color-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('formColor').value = colorId;
+}
+
+function renderIconGrid(selectedId) {
+    const grid = document.getElementById('iconGrid');
+    if (!ALL_ICONS.length) { grid.innerHTML = ''; return; }
+    let html = '';
+    for (const icon of ALL_ICONS) {
+        const sel = icon.id === (selectedId || '1') ? ' selected' : '';
+        html += '<div class="icon-item' + sel + '" data-icon-id="' + icon.id + '" onclick="selectIcon(this, \'' + icon.id + '\')">';
+        html += '<i class="icon-preview ' + icon.css + '"></i>';
+        html += '<span class="icon-label">' + (icon.name || '图标' + icon.id) + '</span>';
+        html += '</div>';
+    }
+    grid.innerHTML = html;
+}
+
+function selectIcon(el, iconId) {
+    document.querySelectorAll('.icon-grid .icon-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('formIcon').value = iconId;
+}
+
+function openAddModal() {
+    EDITING_ID = null;
+    document.getElementById('formTitle').textContent = '新增' + TYPE_LABELS[CURRENT_TYPE] + '科目';
+    document.getElementById('formName').value = '';
+    document.getElementById('formIcon').value = '1';
+    renderIconGrid('1');
+    document.getElementById('formColor').value = 'ff6b22';
+    renderColorGrid('ff6b22');
+    document.getElementById('formComment').value = '';
+    document.getElementById('formHidden').checked = false;
+    document.getElementById('formHiddenField').style.display = 'none';
+    document.getElementById('formParent').innerHTML = getParentOptions(CURRENT_TYPE, null, false);
+    document.getElementById('formSubmitBtn').textContent = '确定';
+    document.getElementById('formModal').classList.add('active');
+    setTimeout(() => document.getElementById('formName').focus(), 100);
+}
+
+function openEditModal(catId) {
+    const cat = CATEGORY_MAP[catId];
+    if (!cat) return;
+    EDITING_ID = catId;
+    document.getElementById('formTitle').textContent = '编辑科目';
+    document.getElementById('formName').value = cat.name;
+    const currentIcon = cat.icon || '1';
+    document.getElementById('formIcon').value = currentIcon;
+    renderIconGrid(currentIcon);
+    const currentColor = cat.color || 'ff6b22';
+    document.getElementById('formColor').value = currentColor;
+    renderColorGrid(currentColor);
+    document.getElementById('formComment').value = cat.comment || '';
+    document.getElementById('formHidden').checked = cat.hidden === true;
+    document.getElementById('formHiddenField').style.display = 'block';
+    // 编辑时：一级科目不允许改归属，二级科目可切换上级
+    const isPrimary = !cat.parentId || cat.parentId === '0';
+    if (isPrimary) {
+        document.getElementById('formParentField').style.display = 'none';
+        document.getElementById('formParent').value = '0';
+    } else {
+        document.getElementById('formParentField').style.display = 'block';
+        document.getElementById('formParent').innerHTML = getParentOptions(cat.type, catId, true);
+        document.getElementById('formParent').value = cat.parentId || '0';
+    }
+    document.getElementById('formSubmitBtn').textContent = '保存';
+    document.getElementById('formModal').classList.add('active');
+    setTimeout(() => document.getElementById('formName').focus(), 100);
+}
+
+function closeFormModal() {
+    document.getElementById('formModal').classList.remove('active');
+    EDITING_ID = null;
+}
+
+async function submitForm() {
+    const name = document.getElementById('formName').value.trim();
+    if (!name) { showToast('请输入科目名称', 'error'); return; }
+    const parentId = document.getElementById('formParent').value;
+    const icon = document.getElementById('formIcon').value;
+    const color = document.getElementById('formColor').value;
+    const comment = document.getElementById('formComment').value.trim();
+    const hidden = document.getElementById('formHidden').checked;
+    const btn = document.getElementById('formSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+    try {
+        if (EDITING_ID) {
+            const resp = await fetch('/api/categories/modify', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: EDITING_ID, name: name, parentId: parentId, icon: icon, color: color, comment: comment, hidden: hidden}),
+            });
+            const result = await resp.json();
+            if (result.success) { showToast('✅ 科目已更新', 'success'); closeFormModal(); await loadCategories(); }
+            else { showToast('❌ ' + result.message, 'error'); }
+        } else {
+            const resp = await fetch('/api/categories/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name, type: CURRENT_TYPE, parentId: parentId, icon: icon, color: color, comment: comment}),
+            });
+            const result = await resp.json();
+            if (result.success) { showToast('✅ 科目已创建', 'success'); closeFormModal(); await loadCategories(); }
+            else { showToast('❌ ' + result.message, 'error'); }
+        }
+    } catch (e) {
+        showToast('❌ 操作失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = EDITING_ID ? '保存' : '确定';
+    }
+}
+
+let _dragSrcId = null;
+
+function onDragStart(e) {
+    const el = e.currentTarget;
+    _dragSrcId = el.dataset.catId;
+    el.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+function onDragEnd(e) {
+    e.currentTarget.classList.remove('dragging');
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    _dragSrcId = null;
+}
+
+function onDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const target = e.currentTarget;
+    if (target.dataset.catId === _dragSrcId) return;
+    const srcEl = document.querySelector(`[data-cat-id="${_dragSrcId}"]`);
+    if (!srcEl) return;
+    // 只允许同级拖动
+    const isParent = target.classList.contains('parent-row');
+    if (!srcEl.classList.contains(isParent ? 'parent-row' : 'child-item')) return;
+    // 二级只能在同一个父级内拖动
+    if (!isParent) {
+        const srcParent = srcEl.closest('.parent-row')?.dataset.catId;
+        const tgtParent = target.closest('.parent-row')?.dataset.catId;
+        if (srcParent !== tgtParent) return;
+    }
+    target.classList.add('drag-over');
+}
+
+function onDrop(e) {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.classList.remove('drag-over');
+    const srcEl = document.querySelector(`[data-cat-id="${_dragSrcId}"]`);
+    if (!srcEl || srcEl === target) return;
+
+    const isParent = target.classList.contains('parent-row');
+    if (!srcEl.classList.contains(isParent ? 'parent-row' : 'child-item')) return;
+
+    // 二级只能在同一个父级内拖动
+    if (!isParent) {
+        const srcParent = srcEl.closest('.parent-row')?.dataset.catId;
+        const tgtParent = target.closest('.parent-row')?.dataset.catId;
+        if (srcParent !== tgtParent) return;
+    }
+
+    const parent = target.parentNode;
+    const rect = target.getBoundingClientRect();
+    parent.insertBefore(srcEl, e.clientY < rect.top + rect.height / 2 ? target : target.nextElementSibling);
+
+    const selector = isParent ? '.parent-row' : '.child-item';
+    const ids = Array.from(parent.querySelectorAll(selector)).map(r => r.dataset.catId);
+    saveOrders(ids.map((id, idx) => ({id, displayOrder: (idx + 1) * 10})));
+}
+
+function saveOrders(orders) {
+    fetch('/api/categories/reorder', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({orders: orders}),
+    }).then(r => r.json()).then(result => {
+        if (result.success) {
+            showToast('✅ 排序已更新', 'success');
+            loadCategories();
+        } else {
+            showToast('❌ ' + result.message, 'error');
+            loadCategories();
+        }
+    }).catch(() => loadCategories());
+}
+
+function openDeleteModal(catId) {
+    const cat = CATEGORY_MAP[catId];
+    if (!cat) return;
+    DELETING_ID = catId;
+    document.getElementById('deleteName').textContent = cat.name;
+    document.getElementById('deleteModal').classList.add('active');
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.remove('active');
+    DELETING_ID = null;
+}
+
+async function confirmDelete() {
+    if (!DELETING_ID) return;
+    const btn = document.getElementById('deleteSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '删除中...';
+    try {
+        const resp = await fetch('/api/categories/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: DELETING_ID}),
+        });
+        const result = await resp.json();
+        if (result.success) { showToast('✅ 科目已删除', 'success'); closeDeleteModal(); await loadCategories(); }
+        else { showToast('❌ ' + result.message, 'error'); }
+    } catch (e) {
+        showToast('❌ 删除失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '删除';
+    }
+}
+
+loadIcons();
+loadCategories();
+{% endblock %}

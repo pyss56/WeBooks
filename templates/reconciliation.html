@@ -1,0 +1,686 @@
+{% extends "base.html" %}
+{% block title %}对账管理{% endblock %}
+{% block nav_reconciliation %}active{% endblock %}
+
+{% block content %}
+<h2>✅ 对账管理</h2>
+<p class="subtitle">创建和管理对账</p>
+
+<!-- 查询区域 -->
+<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">对账号</label>
+      <input type="text" id="queryNo" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:180px;">
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">从</label>
+      <input type="date" id="queryDateFrom" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">至</label>
+      <input type="date" id="queryDateTo" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">状态</label>
+      <select id="queryStatus" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        <option value="">全部</option>
+        <option value="草稿">草稿</option>
+        <option value="确认">已确认</option>
+        <option value="取消">已取消</option>
+      </select>
+    </div>
+    <div>
+      <button class="btn btn-primary" onclick="loadList()">🔍 查询</button>
+    </div>
+    <div style="margin-left:auto;">
+      <button class="btn btn-primary" id="createBtn">➕ 创建对账</button>
+    </div>
+  </div>
+</div>
+
+<!-- 列表区域 -->
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:#fafafa;border-bottom:1px solid #eee;">
+        <th style="padding:12px 16px;text-align:left;color:#555;">对账号</th>
+        <th style="padding:12px 16px;text-align:left;color:#555;">状态</th>
+        <th style="padding:12px 16px;text-align:right;color:#555;">收入金额</th>
+        <th style="padding:12px 16px;text-align:right;color:#555;">支出金额</th>
+        <th style="padding:12px 16px;text-align:right;color:#555;">结余金额</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">确认标识</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">创建时间</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">更新时间</th>
+        <th style="padding:12px 16px;text-align:center;color:#555;">操作</th>
+      </tr>
+    </thead>
+    <tbody id="listBody">
+      <tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 创建对账弹窗 -->
+<div id="createDialog" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:1000;overflow:auto;">
+  <div style="background:#fff;border-radius:12px;margin:40px auto;max-width:1100px;padding:24px;position:relative;max-height:90vh;overflow-y:auto;">
+    <h3 style="margin-bottom:16px;font-size:18px;">➕ 创建对账</h3>
+    <p style="font-size:13px;color:#888;margin-bottom:16px;">
+      对账号将按操作时间自动生成。请选择要加入对账的账单记录。
+    </p>
+
+    <!-- 查询条件 -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:16px;background:#f9f9f9;border-radius:8px;">
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
+        <select id="dialogBillType" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+          <option value="">全部</option>
+          <option value="expense">支出</option>
+          <option value="income">收入</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">科目</label>
+        <select id="dialogCategory" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">账户</label>
+        <select id="dialogAccount" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">是否对账</label>
+        <select id="dialogReconFlag" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+          <option value="否">否</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账人</label>
+        <select id="dialogSourceUser" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账时间从</label>
+        <input type="date" id="dialogTimeFrom" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">至</label>
+        <input type="date" id="dialogTimeTo" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" onclick="loadDialogBills()">🔍 查询</button>
+      </div>
+    </div>
+
+    <!-- 未对账账单列表 -->
+    <h4 style="font-size:14px;color:#333;margin-bottom:8px;">可选账单列表</h4>
+    <div style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#f5f5f5;position:sticky;top:0;">
+            <th style="padding:8px 10px;width:36px;"><input type="checkbox" id="selectAllBills" onchange="toggleAllBills()"></th>
+            <th style="padding:8px 10px;text-align:left;">类型</th>
+            <th style="padding:8px 10px;text-align:left;">科目</th>
+            <th style="padding:8px 10px;text-align:right;">金额</th>
+            <th style="padding:8px 10px;text-align:left;">备注</th>
+            <th style="padding:8px 10px;text-align:left;">记账人</th>
+            <th style="padding:8px 10px;text-align:center;">记账时间</th>
+          </tr>
+        </thead>
+        <tbody id="dialogBillsBody">
+          <tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">请输入查询条件后查询</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="text-align:right;margin-bottom:16px;">
+      <button class="btn btn-primary" onclick="addSelectedBills()">➕ 添加到对账</button>
+    </div>
+
+    <!-- 已加入的账单 -->
+    <h4 style="font-size:14px;color:#333;margin-bottom:8px;">已加入的账单</h4>
+    <div style="max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#f5f5f5;position:sticky;top:0;">
+            <th style="padding:8px 10px;text-align:left;">类型</th>
+            <th style="padding:8px 10px;text-align:left;">科目</th>
+            <th style="padding:8px 10px;text-align:right;">金额</th>
+            <th style="padding:8px 10px;text-align:left;">备注</th>
+            <th style="padding:8px 10px;text-align:left;">记账人</th>
+            <th style="padding:8px 10px;text-align:center;">记账时间</th>
+          </tr>
+        </thead>
+        <tbody id="addedBillsBody">
+          <tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 底部按钮 -->
+    <div style="display:flex;justify-content:flex-end;gap:12px;border-top:1px solid #eee;padding-top:16px;">
+      <button class="btn btn-outline" onclick="closeCreateDialog()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 科目汇总图表弹窗 -->
+<div id="chartDialog" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:1000;overflow:auto;">
+  <div style="background:#fff;border-radius:12px;margin:40px auto;max-width:900px;padding:24px;position:relative;">
+    <h3 style="margin-bottom:16px;font-size:18px;">📊 科目汇总</h3>
+    <p style="font-size:13px;color:#888;margin-bottom:16px;">对账号：<strong id="chartReconNo"></strong></p>
+    <div id="chartSummary"></div>
+    <div style="position:relative;height:400px;">
+      <canvas id="categoryChart"></canvas>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:16px;">
+      <button class="btn btn-outline" onclick="closeChartDialog()">关闭</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_style %}
+<style>
+  .status-badge {
+    display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;
+  }
+  .status-draft { background:#fff3e0;color:#e65100; }
+  .status-confirmed { background:#e8f5e9;color:#2e7d32; }
+  .status-cancelled { background:#f5f5f5;color:#999; }
+  .amt-income { color:#2e7d32; }
+  .amt-expense { color:#c62828; }
+  table tbody tr:hover { background:#f0f7ff; }
+  .op-btn { padding:4px 10px;border:none;border-radius:3px;font-size:11px;cursor:pointer;margin:0 2px; }
+  .op-btn.edit { background:#e3f2fd;color:#1565c0; }
+  .op-btn.confirm { background:#e8f5e9;color:#2e7d32; }
+  .op-btn.cancel { background:#fce4ec;color:#c62828; }
+  .op-btn.chart { background:#e8f5e9;color:#2e7d32; }
+  .op-btn:disabled { opacity:0.5;cursor:not-allowed; }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+let currentReconciliationNo = '';
+let addedBills = [];
+var userMap = {};
+
+function fmtMoney(v) {
+  return Number(v / 100 || 0).toLocaleString('zh-CN', {minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadList() {
+  const tbody = document.getElementById('listBody');
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+  try {
+    const params = new URLSearchParams();
+    const no = document.getElementById('queryNo').value.trim();
+    if (no) params.set('reconciliation_no', no);
+    const status = document.getElementById('queryStatus').value;
+    if (status) params.set('status', status);
+    const dateFrom = document.getElementById('queryDateFrom').value;
+    if (dateFrom) params.set('date_from', dateFrom);
+    const dateTo = document.getElementById('queryDateTo').value;
+    if (dateTo) params.set('date_to', dateTo);
+
+    const resp = await fetch('/api/reconciliation/list?' + params.toString());
+    const result = await resp.json();
+    if (!result.success) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      return;
+    }
+    const list = result.data || [];
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">暂无对账记录</td></tr>';
+      return;
+    }
+    let html = '';
+    list.forEach(item => {
+      const statusClass = item.status === '确认' ? 'status-confirmed' : (item.status === '取消' ? 'status-cancelled' : 'status-draft');
+      const canEdit = item.status === '草稿';
+      html += '<tr>';
+      html += '<td style="padding:12px 16px;"><a href="javascript:void(0)" onclick="openEdit(\'' + item.reconciliation_no + '\')" style="color:#1565c0;text-decoration:none;">' + escapeHtml(item.reconciliation_no) + '</a></td>';
+      html += '<td style="padding:12px 16px;"><span class="status-badge ' + statusClass + '">' + escapeHtml(item.status) + '</span></td>';
+      html += '<td style="padding:12px 16px;text-align:right;color:#2e7d32;">¥' + fmtMoney(item.income_amount) + '</td>';
+      html += '<td style="padding:12px 16px;text-align:right;color:#c62828;">¥' + fmtMoney(item.expense_amount) + '</td>';
+      html += '<td style="padding:12px 16px;text-align:right;font-weight:600;">¥' + fmtMoney(item.balance_amount) + '</td>';
+      html += '<td style="padding:12px 16px;text-align:center;">' + escapeHtml(item.confirm_flag) + '</td>';
+      html += '<td style="padding:12px 16px;text-align:center;font-size:12px;color:#888;">' + escapeHtml(item.created_at) + '</td>';
+      html += '<td style="padding:12px 16px;text-align:center;font-size:12px;color:#888;">' + escapeHtml(item.updated_at) + '</td>';
+      html += '<td style="padding:12px 16px;text-align:center;">';
+      html += '<button class="op-btn edit" ' + (canEdit ? 'onclick="openEdit(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>编辑</button>';
+      html += '<button class="op-btn confirm" ' + (canEdit ? 'onclick="confirmRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>确认</button>';
+      html += '<button class="op-btn cancel" ' + (canEdit ? 'onclick="cancelRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>取消</button>';
+      html += '<button class="op-btn chart" onclick="showCategoryChart(\'' + item.reconciliation_no + '\')">📊 汇总</button>';
+      html += '</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+async function showCreateDialog() {
+  currentReconciliationNo = '';
+  addedBills = [];
+  document.getElementById('createDialog').style.display = 'block';
+  document.getElementById('addedBillsBody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+  document.getElementById('dialogBillsBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">请输入查询条件后查询</td></tr>';
+
+  // 加载账户、科目、用户列表
+  try {
+    const [acctResp, catResp, userResp] = await Promise.all([
+      fetch('/api/accounts'),
+      fetch('/api/categories/list'),
+      fetch('/api/users/list?status=1')
+    ]);
+    const acctResult = await acctResp.json();
+    const catResult = await catResp.json();
+    const userResult = await userResp.json();
+
+    // 默认时间：上个月1号 → 本月最后一天
+    var now = new Date();
+    var year = now.getFullYear();
+    var month = now.getMonth();
+    var lastDay = new Date(year, month + 1, 0);
+    var endStr = lastDay.getFullYear() + '-' + String(lastDay.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay.getDate()).padStart(2, '0');
+    var prevMonth = new Date(year, month - 1, 1);
+    var startStr = prevMonth.getFullYear() + '-' + String(prevMonth.getMonth() + 1).padStart(2, '0') + '-01';
+    document.getElementById('dialogTimeFrom').value = startStr;
+    document.getElementById('dialogTimeTo').value = endStr;
+
+    // 账户下拉（展平）
+    var acctSel = document.getElementById('dialogAccount');
+    acctSel.innerHTML = '<option value="">全部</option>';
+    if (acctResult.success && acctResult.data) {
+      var flat = [];
+      (acctResult.data || []).forEach(function(a) {
+        if (a.subAccounts && a.subAccounts.length) {
+          a.subAccounts.forEach(function(s) { flat.push(s); });
+        } else {
+          flat.push(a);
+        }
+      });
+      flat.forEach(function(a) {
+        var opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.name;
+        acctSel.appendChild(opt);
+      });
+    }
+    // 构建 user_code → name 映射
+    if (userResult.success) {
+      (userResult.data || []).forEach(function(u) { userMap[u.code] = u.name; });
+    }
+    // 用户下拉（用 name 显示，跳过停用用户）
+    var userSel = document.getElementById('dialogSourceUser');
+    userSel.innerHTML = '<option value="">全部</option>';
+    if (userResult.success) {
+      (userResult.data || []).forEach(function(u) {
+        var opt = document.createElement('option');
+        opt.value = u.code;
+        opt.textContent = u.name;
+        userSel.appendChild(opt);
+      });
+    }
+    // 科目加载 + 类型联动
+    var allCategories = [];
+    if (catResult.success && catResult.categories) {
+      allCategories = catResult.categories;
+    }
+    function getCategoryNames(typeFilter) {
+      var names = [];
+      allCategories.forEach(function(c) {
+        var catType = c.type;
+        if (typeFilter && catType !== typeFilter) return;
+        var subs = c.subCategories || [];
+        if (subs.length) {
+          subs.forEach(function(s) {
+            if (!typeFilter || s.type === typeFilter) {
+              if (names.indexOf(s.name) === -1) names.push(s.name);
+            }
+          });
+        } else {
+          if (names.indexOf(c.name) === -1) names.push(c.name);
+        }
+      });
+      return names.sort();
+    }
+    function loadCategories(typeVal) {
+      var catSel = document.getElementById('dialogCategory');
+      catSel.innerHTML = '<option value="">全部</option>';
+      var typeFilter = typeVal === 'expense' ? 2 : (typeVal === 'income' ? 1 : null);
+      getCategoryNames(typeFilter).forEach(function(n) {
+        var opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n;
+        catSel.appendChild(opt);
+      });
+    }
+    document.getElementById('dialogBillType').addEventListener('change', function() {
+      loadCategories(this.value);
+    });
+    loadCategories('');
+  } catch(e) {}
+}
+
+function closeCreateDialog() {
+  document.getElementById('createDialog').style.display = 'none';
+}
+
+async function loadDialogBills() {
+  const tbody = document.getElementById('dialogBillsBody');
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">加载中...</td></tr>';
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    params.set('reconciliation_flag', '0');
+    params.set('exclude_transfer', '1');
+    var billType = document.getElementById('dialogBillType').value;
+    if (billType) params.set('bill_type', billType);
+    var cat = document.getElementById('dialogCategory').value;
+    if (cat) params.set('account_filter', cat);
+    var acct = document.getElementById('dialogAccount').value;
+    if (acct) params.set('account_id', acct);
+    var user = document.getElementById('dialogSourceUser').value;
+    if (user) params.set('source_user', user);
+    const from = document.getElementById('dialogTimeFrom').value;
+    const to = document.getElementById('dialogTimeTo').value;
+    if (from) params.set('transaction_time_from', from + ' 00:00:00');
+    if (to) params.set('transaction_time_to', to + ' 23:59:59');
+
+    const resp = await fetch('/api/transactions/list?' + params.toString());
+    const result = await resp.json();
+    if (!result.success) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      return;
+    }
+    const bills = result.data || [];
+    if (bills.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">未找到符合条件的账单</td></tr>';
+      return;
+    }
+    // 过滤掉已经加入的
+    const addedIds = new Set(addedBills.map(b => b.id));
+    const filtered = bills.filter(b => !addedIds.has(b.id));
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">所有符合条件的账单已加入</td></tr>';
+      return;
+    }
+
+    let html = '';
+    filtered.forEach(b => {
+      const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+      const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
+      html += '<tr>';
+      html += '<td style="padding:6px 10px;text-align:center;"><input type="checkbox" class="bill-check" value="' + b.id + '"></td>';
+      html += '<td style="padding:6px 10px;">' + typeLabel + '</td>';
+      html += '<td style="padding:6px 10px;">' + escapeHtml(b.category_name || '') + '</td>';
+      html += '<td style="padding:6px 10px;text-align:right;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
+      html += '<td style="padding:6px 10px;color:#888;">' + escapeHtml(b.comment || '') + '</td>';
+      html += '<td style="padding:6px 10px;">' + escapeHtml(userMap[b.source_user] || b.source_user || '') + '</td>';
+      html += '<td style="padding:6px 10px;text-align:center;font-size:11px;color:#888;">' + escapeHtml(b.bill_time || '') + '</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+    document.getElementById('selectAllBills').checked = false;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function toggleAllBills() {
+  const checked = document.getElementById('selectAllBills').checked;
+  document.querySelectorAll('.bill-check').forEach(cb => cb.checked = checked);
+}
+
+async function addSelectedBills() {
+  const checked = document.querySelectorAll('.bill-check:checked');
+  if (checked.length === 0) {
+    showToast('请选择要添加的账单', 'error');
+    return;
+  }
+  const billIds = Array.from(checked).map(cb => parseInt(cb.value));
+  try {
+    // 首次添加时先创建对账
+    if (!currentReconciliationNo) {
+      const createResp = await fetch('/api/reconciliation/create', {method:'POST'});
+      const createResult = await createResp.json();
+      if (!createResult.success) {
+        showToast('创建对账失败: ' + createResult.message, 'error');
+        return;
+      }
+      currentReconciliationNo = createResult.reconciliation_no;
+    }
+    // 直接保存到后端
+    const addResp = await fetch('/api/reconciliation/add-transactions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({reconciliation_no: currentReconciliationNo, tx_ids: billIds})
+    });
+    const addResult = await addResp.json();
+    if (!addResult.success) {
+      showToast('添加账单失败: ' + addResult.message, 'error');
+      return;
+    }
+    showToast('✅ 已添加 ' + billIds.length + ' 条', 'success');
+    // 刷新可选和已加入列表
+    loadDialogBills();
+    loadAddedBills();
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
+}
+
+async function loadAddedBills() {
+  const tbody = document.getElementById('addedBillsBody');
+  if (!currentReconciliationNo) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/reconciliation/detail?reconciliation_no=' + encodeURIComponent(currentReconciliationNo));
+    const result = await resp.json();
+    if (!result.success) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+      return;
+    }
+    const bills = result.transactions || [];
+    if (bills.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+      return;
+    }
+    let html = '';
+    bills.forEach(b => {
+      const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+      const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
+      html += '<tr>';
+      html += '<td style="padding:6px 10px;">' + typeLabel + '</td>';
+      html += '<td style="padding:6px 10px;">' + escapeHtml(b.category_name || '') + '</td>';
+      html += '<td style="padding:6px 10px;text-align:right;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
+      html += '<td style="padding:6px 10px;color:#888;">' + escapeHtml(b.comment || '') + '</td>';
+      html += '<td style="padding:6px 10px;">' + escapeHtml(userMap[b.user_code] || b.user_code || '') + '</td>';
+      html += '<td style="padding:6px 10px;text-align:center;font-size:11px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+  }
+}
+
+function closeChartDialog() {
+  document.getElementById('chartDialog').style.display = 'none';
+}
+
+async function showCategoryChart(reconNo) {
+  document.getElementById('chartDialog').style.display = 'block';
+  document.getElementById('chartReconNo').textContent = reconNo;
+  try {
+    const resp = await fetch('/api/reconciliation/detail?reconciliation_no=' + encodeURIComponent(reconNo));
+    const result = await resp.json();
+    if (!result.success) { showToast('❌ ' + result.message, 'error'); return; }
+    const bills = result.transactions || [];
+    // 按科目分组统计收入和支出
+    var incomeMap = {};
+    var expenseMap = {};
+    var totalIncome = 0, totalExpense = 0;
+    bills.forEach(function(b) {
+      var cat = b.category_name || '未分类';
+      var amt = Math.abs(b.amount) / 100;
+      if (b.bill_type === 'income') {
+        incomeMap[cat] = (incomeMap[cat] || 0) + amt;
+        totalIncome += amt;
+      } else if (b.bill_type === 'expense') {
+        expenseMap[cat] = (expenseMap[cat] || 0) + amt;
+        totalExpense += amt;
+      }
+    });
+    // 排序：先支出（按金额降序），再收入（按金额降序）
+    var expenseCats = Object.keys(expenseMap).sort(function(a,b) { return expenseMap[b] - expenseMap[a]; });
+    var incomeCats = Object.keys(incomeMap).sort(function(a,b) { return incomeMap[b] - incomeMap[a]; });
+    var allCategories = expenseCats.concat(incomeCats);
+    var expenseData = allCategories.map(function(c) { return expenseMap[c] || 0; });
+    var incomeData = allCategories.map(function(c) { return incomeMap[c] || 0; });
+
+    // 更新总计
+    var summaryHtml = '<div style="text-align:center;margin-bottom:16px;font-size:14px;">';
+    summaryHtml += '<span style="color:#2e7d32;font-weight:700;">收入合计：¥' + totalIncome.toFixed(2) + '</span>';
+    summaryHtml += ' &nbsp;&nbsp;&nbsp; ';
+    summaryHtml += '<span style="color:#c62828;font-weight:700;">支出合计：¥' + totalExpense.toFixed(2) + '</span>';
+    summaryHtml += '</div>';
+    document.getElementById('chartSummary').innerHTML = summaryHtml;
+
+    // 加载 Chart.js + datalabels 插件
+    function loadChartAndRender() {
+      if (typeof Chart === 'undefined') {
+        var s1 = document.createElement('script');
+        s1.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+        s1.onload = function() {
+          var s2 = document.createElement('script');
+          s2.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels';
+          s2.onload = function() { renderChart(allCategories, incomeData, expenseData); };
+          document.head.appendChild(s2);
+        };
+        document.head.appendChild(s1);
+      } else if (typeof ChartDataLabels === 'undefined') {
+        var s2 = document.createElement('script');
+        s2.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels';
+        s2.onload = function() { renderChart(allCategories, incomeData, expenseData); };
+        document.head.appendChild(s2);
+      } else {
+        renderChart(allCategories, incomeData, expenseData);
+      }
+    }
+    loadChartAndRender();
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  }
+}
+
+var _chartInstance = null;
+function renderChart(labels, incomeData, expenseData) {
+  var ctx = document.getElementById('categoryChart').getContext('2d');
+  if (_chartInstance) _chartInstance.destroy();
+  _chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: '收入', data: incomeData, backgroundColor: 'rgba(46,125,50,0.7)', borderColor: '#2e7d32', borderWidth: 1 },
+        { label: '支出', data: expenseData, backgroundColor: 'rgba(198,40,40,0.7)', borderColor: '#c62828', borderWidth: 1 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' },
+        datalabels: {
+          anchor: 'end',
+          align: 'end',
+          color: '#444',
+          font: { weight: 'bold', size: 11 },
+          formatter: function(v) { return v > 0 ? '¥' + v.toFixed(2) : ''; }
+        }
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: function(v) { return '¥' + v.toLocaleString(); } } },
+        x: { grid: { display: false } }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+}
+
+function openEdit(reconNo) {
+  window.location.href = '/reconciliation/' + reconNo + '/edit';
+}
+
+async function confirmRecon(reconNo) {
+  if (!confirm('确认对账 ' + reconNo + ' ？')) return;
+  try {
+    const resp = await fetch('/api/reconciliation/confirm', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({reconciliation_no: reconNo})
+    });
+    const result = await resp.json();
+    if (result.success) {
+      showToast('✅ ' + result.message, 'success');
+      loadList();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
+}
+
+async function cancelRecon(reconNo) {
+  if (!confirm('取消对账 ' + reconNo + ' ？')) return;
+  try {
+    const resp = await fetch('/api/reconciliation/cancel', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({reconciliation_no: reconNo})
+    });
+    const result = await resp.json();
+    if (result.success) {
+      showToast('✅ ' + result.message, 'success');
+      loadList();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
+}
+
+// 初始化日期：上个月1号 → 本月最后一天
+(function() {
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = now.getMonth();
+  var lastDay = new Date(year, month + 1, 0);
+  var endStr = lastDay.getFullYear() + '-' + String(lastDay.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay.getDate()).padStart(2, '0');
+  var prevMonth = new Date(year, month - 1, 1);
+  var startStr = prevMonth.getFullYear() + '-' + String(prevMonth.getMonth() + 1).padStart(2, '0') + '-01';
+  document.getElementById('queryDateFrom').value = startStr;
+  document.getElementById('queryDateTo').value = endStr;
+})();
+
+loadList();
+document.getElementById('createBtn').addEventListener('click', showCreateDialog);
+{% endblock %}

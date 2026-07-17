@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}编辑对账{% endblock %}
+{% block nav_reconciliation %}active{% endblock %}
+
+{% block content %}
+<h2>✅ 编辑对账</h2>
+<p class="subtitle">对账号：{{ reconciliation_no }}</p>
+
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);padding:24px;margin-bottom:20px;">
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:16px;">
+    <div><span style="font-size:12px;color:#888;">收入金额：</span><span style="font-size:18px;font-weight:700;color:#2e7d32;" id="incomeAmount">¥0.00</span></div>
+    <div><span style="font-size:12px;color:#888;">支出金额：</span><span style="font-size:18px;font-weight:700;color:#c62828;" id="expenseAmount">¥0.00</span></div>
+    <div><span style="font-size:12px;color:#888;">结余金额：</span><span style="font-size:18px;font-weight:700;color:#1565c0;" id="balanceAmount">¥0.00</span></div>
+    <div><span style="font-size:12px;color:#888;">状态：</span><span id="statusBadge" style="font-size:14px;font-weight:600;"></span></div>
+  </div>
+
+  <div id="editArea" style="display:none;">
+    <!-- 查询条件 -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:16px;background:#f9f9f9;border-radius:8px;">
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
+        <select id="editBillType" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+          <option value="">全部</option>
+          <option value="expense">支出</option>
+          <option value="income">收入</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">科目</label>
+        <select id="editCategory" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">账户</label>
+        <select id="editAccount" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账人</label>
+        <select id="editSourceUser" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账时间从</label>
+        <input type="date" id="editTimeFrom" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">至</label>
+        <input type="date" id="editTimeTo" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" onclick="loadAvailableBills()">🔍 查询</button>
+      </div>
+    </div>
+
+    <!-- 可选账单列表 -->
+    <h4 style="font-size:14px;color:#333;margin-bottom:8px;">可选账单列表</h4>
+    <div style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:8px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#f5f5f5;position:sticky;top:0;">
+            <th style="padding:8px 10px;width:36px;"><input type="checkbox" id="selectAllBills" onchange="toggleAllBills()"></th>
+            <th style="padding:8px 10px;text-align:left;">类型</th>
+            <th style="padding:8px 10px;text-align:left;">科目</th>
+            <th style="padding:8px 10px;text-align:right;">金额</th>
+            <th style="padding:8px 10px;text-align:left;">备注</th>
+            <th style="padding:8px 10px;text-align:left;">记账人</th>
+            <th style="padding:8px 10px;text-align:center;">记账时间</th>
+          </tr>
+        </thead>
+        <tbody id="availableBillsBody">
+          <tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">请输入查询条件后查询</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:right;margin-bottom:16px;">
+      <button class="btn btn-primary" onclick="addSelectedBills()">➕ 添加到对账</button>
+    </div>
+
+    <!-- 已加入的账单 -->
+    <h4 style="font-size:14px;color:#333;margin-bottom:8px;">已加入的账单</h4>
+    <div style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#f5f5f5;position:sticky;top:0;">
+            <th style="padding:8px 10px;text-align:left;">类型</th>
+            <th style="padding:8px 10px;text-align:left;">科目</th>
+            <th style="padding:8px 10px;text-align:right;">金额</th>
+            <th style="padding:8px 10px;text-align:left;">备注</th>
+            <th style="padding:8px 10px;text-align:left;">记账人</th>
+            <th style="padding:8px 10px;text-align:center;">记账时间</th>
+            <th style="padding:8px 10px;text-align:center;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="addedBillsBody">
+          <tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 底部按钮 -->
+  <div style="display:flex;justify-content:flex-end;gap:12px;border-top:1px solid #eee;padding-top:16px;">
+    <button class="btn btn-outline" onclick="window.location.href='/reconciliation'">返回列表</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_style %}
+<style>
+  .status-badge { display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600; }
+  .status-draft { background:#fff3e0;color:#e65100; }
+  .status-confirmed { background:#e8f5e9;color:#2e7d32; }
+  .status-cancelled { background:#f5f5f5;color:#999; }
+  .amt-income { color:#2e7d32; }
+  .amt-expense { color:#c62828; }
+  table tbody tr:hover { background:#f0f7ff; }
+  .op-btn { padding:4px 10px;border:none;border-radius:3px;font-size:11px;cursor:pointer;margin:0 2px; }
+  .op-btn.del { background:#fce4ec;color:#c62828; }
+  .op-btn:disabled { opacity:0.5;cursor:not-allowed; }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+const RECON_NO = '{{ reconciliation_no }}';
+var userMap = {};
+
+function fmtMoney(v) {
+  return Number(v / 100 || 0).toLocaleString('zh-CN', {minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadDetail() {
+  try {
+    // 先加载用户映射
+    try {
+      const userResp = await fetch('/api/users/list?status=1');
+      const userResult = await userResp.json();
+      if (userResult.success) {
+        (userResult.data || []).forEach(function(u) { userMap[u.code] = u.name; });
+      }
+    } catch(e) {}
+
+    const resp = await fetch('/api/reconciliation/detail?reconciliation_no=' + encodeURIComponent(RECON_NO));
+    const result = await resp.json();
+    if (!result.success) {
+      document.getElementById('addedBillsBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      return;
+    }
+    const header = result.header || {};
+    const bills = result.transactions || [];
+
+    // 更新汇总金额
+    document.getElementById('incomeAmount').textContent = '¥' + fmtMoney(header.income_amount);
+    document.getElementById('expenseAmount').textContent = '¥' + fmtMoney(header.expense_amount);
+    document.getElementById('balanceAmount').textContent = '¥' + fmtMoney(header.balance_amount);
+
+    // 状态
+    const badge = document.getElementById('statusBadge');
+    const statusClass = header.status === '确认' ? 'status-confirmed' : (header.status === '取消' ? 'status-cancelled' : 'status-draft');
+    badge.innerHTML = '<span class="status-badge ' + statusClass + '">' + escapeHtml(header.status) + '</span>';
+
+    const isDraft = header.status === '草稿';
+    document.getElementById('editArea').style.display = isDraft ? 'block' : 'none';
+
+    renderAddedBills(bills, isDraft);
+    initFilters();
+  } catch (e) {
+    document.getElementById('addedBillsBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function renderAddedBills(bills, canDelete) {
+  const tbody = document.getElementById('addedBillsBody');
+  if (!bills || bills.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+    return;
+  }
+  let html = '';
+  bills.forEach(b => {
+    const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+    const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
+    html += '<tr>';
+    html += '<td style="padding:6px 10px;">' + typeLabel + '</td>';
+    html += '<td style="padding:6px 10px;">' + escapeHtml(b.category_name || '') + '</td>';
+    html += '<td style="padding:6px 10px;text-align:right;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
+    html += '<td style="padding:6px 10px;color:#888;">' + escapeHtml(b.comment || '') + '</td>';
+    html += '<td style="padding:6px 10px;">' + escapeHtml(userMap[b.user_code] || b.user_code || '') + '</td>';
+    html += '<td style="padding:6px 10px;text-align:center;font-size:11px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
+    html += '<td style="padding:6px 10px;text-align:center;">';
+    if (canDelete) {
+      html += '<button class="op-btn del" onclick="removeBill(' + b.id + ')">删除</button>';
+    }
+    html += '</td>';
+    html += '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+// ---- 查询条件初始化 ----
+async function initFilters() {
+  try {
+    const [acctResp, catResp, userResp] = await Promise.all([
+      fetch('/api/accounts'),
+      fetch('/api/categories/list'),
+      fetch('/api/users/list?status=1')
+    ]);
+    const acctResult = await acctResp.json();
+    const catResult = await catResp.json();
+    const userResult = await userResp.json();
+
+    // 默认时间
+    var now = new Date();
+    var year = now.getFullYear();
+    var month = now.getMonth();
+    var lastDay = new Date(year, month + 1, 0);
+    var endStr = lastDay.getFullYear() + '-' + String(lastDay.getMonth() + 1).padStart(2, '0') + '-' + String(lastDay.getDate()).padStart(2, '0');
+    var prevMonth = new Date(year, month - 1, 1);
+    var startStr = prevMonth.getFullYear() + '-' + String(prevMonth.getMonth() + 1).padStart(2, '0') + '-01';
+    document.getElementById('editTimeFrom').value = startStr;
+    document.getElementById('editTimeTo').value = endStr;
+
+    // 账户下拉
+    var acctSel = document.getElementById('editAccount');
+    acctSel.innerHTML = '<option value="">全部</option>';
+    if (acctResult.success && acctResult.data) {
+      var flat = [];
+      (acctResult.data || []).forEach(function(a) {
+        if (a.subAccounts && a.subAccounts.length) {
+          a.subAccounts.forEach(function(s) { flat.push(s); });
+        } else {
+          flat.push(a);
+        }
+      });
+      flat.forEach(function(a) {
+        var opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.name;
+        acctSel.appendChild(opt);
+      });
+    }
+
+    // 用户映射和下拉
+    if (userResult.success) {
+      (userResult.data || []).forEach(function(u) { userMap[u.code] = u.name; });
+    }
+    var userSel = document.getElementById('editSourceUser');
+    userSel.innerHTML = '<option value="">全部</option>';
+    if (userResult.success) {
+      (userResult.data || []).forEach(function(u) {
+        var opt = document.createElement('option');
+        opt.value = u.code;
+        opt.textContent = u.name;
+        userSel.appendChild(opt);
+      });
+    }
+
+    // 科目加载 + 类型联动
+    var allCategories = [];
+    if (catResult.success && catResult.categories) {
+      allCategories = catResult.categories;
+    }
+    function getCategoryNames(typeFilter) {
+      var names = [];
+      allCategories.forEach(function(c) {
+        var catType = c.type;
+        if (typeFilter && catType !== typeFilter) return;
+        var subs = c.subCategories || [];
+        if (subs.length) {
+          subs.forEach(function(s) {
+            if (!typeFilter || s.type === typeFilter) {
+              if (names.indexOf(s.name) === -1) names.push(s.name);
+            }
+          });
+        } else {
+          if (names.indexOf(c.name) === -1) names.push(c.name);
+        }
+      });
+      return names.sort();
+    }
+    function loadCategories(typeVal) {
+      var catSel = document.getElementById('editCategory');
+      catSel.innerHTML = '<option value="">全部</option>';
+      var typeFilter = typeVal === 'expense' ? 2 : (typeVal === 'income' ? 1 : null);
+      getCategoryNames(typeFilter).forEach(function(n) {
+        var opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n;
+        catSel.appendChild(opt);
+      });
+    }
+    document.getElementById('editBillType').addEventListener('change', function() {
+      loadCategories(this.value);
+    });
+    loadCategories('');
+  } catch(e) {}
+}
+
+// ---- 查询可选账单 ----
+async function loadAvailableBills() {
+  const tbody = document.getElementById('availableBillsBody');
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">加载中...</td></tr>';
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    // 只查未对账的
+    params.set('reconciliation_flag', '0');
+    params.set('exclude_transfer', '1');
+    var billType = document.getElementById('editBillType').value;
+    if (billType) params.set('bill_type', billType);
+    var cat = document.getElementById('editCategory').value;
+    if (cat) params.set('account_filter', cat);
+    var acct = document.getElementById('editAccount').value;
+    if (acct) params.set('account_id', acct);
+    var user = document.getElementById('editSourceUser').value;
+    if (user) params.set('source_user', user);
+    const from = document.getElementById('editTimeFrom').value;
+    const to = document.getElementById('editTimeTo').value;
+    if (from) params.set('transaction_time_from', from + ' 00:00:00');
+    if (to) params.set('transaction_time_to', to + ' 23:59:59');
+
+    const resp = await fetch('/api/transactions/list?' + params.toString());
+    const result = await resp.json();
+    if (!result.success) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      return;
+    }
+    const allBills = result.data || [];
+    // 过滤掉当前已加入对账的
+    const existingIds = new Set();
+    document.querySelectorAll('#addedBillsBody tr').forEach(function(row) {
+      var btn = row.querySelector('.op-btn.del');
+      if (btn) {
+        var m = btn.getAttribute('onclick').match(/removeBill\((\d+)\)/);
+        if (m) existingIds.add(parseInt(m[1]));
+      }
+    });
+    const filtered = allBills.filter(b => !existingIds.has(b.id));
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">所有符合条件的账单已加入</td></tr>';
+      return;
+    }
+    let html = '';
+    filtered.forEach(b => {
+      const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+      const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
+      html += '<tr>';
+      html += '<td style="padding:6px 10px;text-align:center;"><input type="checkbox" class="bill-check" value="' + b.id + '"></td>';
+      html += '<td style="padding:6px 10px;">' + typeLabel + '</td>';
+      html += '<td style="padding:6px 10px;">' + escapeHtml(b.category_name || '') + '</td>';
+      html += '<td style="padding:6px 10px;text-align:right;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
+      html += '<td style="padding:6px 10px;color:#888;">' + escapeHtml(b.comment || '') + '</td>';
+      html += '<td style="padding:6px 10px;">' + escapeHtml(userMap[b.user_code] || b.user_code || '') + '</td>';
+      html += '<td style="padding:6px 10px;text-align:center;font-size:11px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+    document.getElementById('selectAllBills').checked = false;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function toggleAllBills() {
+  const checked = document.getElementById('selectAllBills').checked;
+  document.querySelectorAll('.bill-check').forEach(cb => cb.checked = checked);
+}
+
+// ---- 添加到对账 ----
+async function addSelectedBills() {
+  const checked = document.querySelectorAll('.bill-check:checked');
+  if (checked.length === 0) {
+    showToast('请选择要添加的账单', 'error');
+    return;
+  }
+  const billIds = Array.from(checked).map(cb => parseInt(cb.value));
+  try {
+    const resp = await fetch('/api/reconciliation/add-transactions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({reconciliation_no: RECON_NO, tx_ids: billIds})
+    });
+    const result = await resp.json();
+    if (result.success) {
+      showToast('✅ 已添加 ' + billIds.length + ' 条', 'success');
+      loadDetail();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
+}
+
+// ---- 删除明细 ----
+async function removeBill(billId) {
+  if (!confirm('确定删除此明细？')) return;
+  try {
+    const resp = await fetch('/api/reconciliation/remove-transactions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({reconciliation_no: RECON_NO, tx_ids: [billId]})
+    });
+    const result = await resp.json();
+    if (result.success) {
+      showToast('✅ 已删除', 'success');
+      loadDetail();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('操作失败: ' + e.message, 'error');
+  }
+}
+
+loadDetail();
+{% endblock %}
