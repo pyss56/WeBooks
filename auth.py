@@ -76,7 +76,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #f
 <div class="card">
   <h1>WeBooks</h1>
   <div class="sub">请输入管理员账号密码</div>
-  <form method="post" action="/{{ entry_code }}/login{% if next %}?next={{ next }}{% endif %}">
+  <form method="post" action="{% if entry_code %}/{{ entry_code }}{% endif %}/login{% if next %}?next={{ next }}{% endif %}">
     <div class="field">
       <label>用户名</label>
       <input type="text" name="username" placeholder="请输入用户名" value="{{ username }}" autofocus>

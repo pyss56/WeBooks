@@ -250,6 +250,7 @@ def _create_all_tables(conn):
             name            TEXT NOT NULL,
             code            TEXT NOT NULL UNIQUE,
             status          INTEGER NOT NULL DEFAULT 1,
+            deleted_at      TEXT DEFAULT NULL,
             created_by      TEXT DEFAULT NULL,
             created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             updated_by      TEXT DEFAULT NULL,
