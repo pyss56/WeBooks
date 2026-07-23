@@ -15,16 +15,6 @@ DB_PATH = os.path.join(DB_DIR, 'data.db')
 DB_VERSION = 4
 
 
-def _get_schema_version(conn) -> int:
-    """获取当前数据库的 schema 版本号。返回 0 表示尚未初始化。"""
-    try:
-        cursor = conn.execute("SELECT version FROM schema_version")
-        row = cursor.fetchone()
-        return row['version'] if row else 0
-    except sqlite3.OperationalError:
-        return 0
-
-
 def _set_schema_version(conn, version: int):
     """记录数据库 schema 版本号。"""
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -445,116 +435,13 @@ def init_db():
     """初始化数据库表结构"""
     conn = get_connection()
     try:
-        current = _get_schema_version(conn)
-
         # 始终确保所有表结构存在（CREATE TABLE IF NOT EXISTS 幂等安全）
         _create_all_tables(conn)
 
-        if current < DB_VERSION:
-            # v4: 统一用户密码/管理员/菜单/角色系统
-            logger.info("数据库迁移 v4: 统一用户/菜单/角色系统")
-            for col, ddl in [
-                ("password_hash", "ALTER TABLE \"user\" ADD COLUMN password_hash TEXT DEFAULT NULL"),
-                ("is_admin", "ALTER TABLE \"user\" ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"),
-                ("default_expanded", "ALTER TABLE menu ADD COLUMN default_expanded INTEGER NOT NULL DEFAULT 1"),
-                ("visible_to", "ALTER TABLE sidebar_menu ADD COLUMN visible_to TEXT DEFAULT 'all'"),
-            ]:
-                try:
-                    conn.execute(ddl)
-                except sqlite3.OperationalError:
-                    pass
-            # 清理过渡表（幂等）
-            try:
-                conn.execute("DROP TABLE IF EXISTS menu_button")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("DROP TABLE IF EXISTS role_menu_button")
-            except sqlite3.OperationalError:
-                pass
-            # 从 sidebar_menu 迁移数据到 menu（如果 menu 为空）
-            try:
-                sm_count = conn.execute("SELECT COUNT(*) FROM sidebar_menu").fetchone()[0]
-                m_count = conn.execute("SELECT COUNT(*) FROM menu").fetchone()[0]
-                if sm_count > 0 and m_count == 0:
-                    rows = conn.execute("SELECT * FROM sidebar_menu").fetchall()
-                    for r in rows:
-                        conn.execute(
-                            "INSERT INTO menu (id, parent_id, type, label, icon, url, sort_order, is_active, default_expanded, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
-                            (r['id'], r.get('parent_id', 0), r.get('type', 'page'), r['label'], r['icon'],
-                             r.get('url'), r['sort_order'], r['is_active'],
-                             r['created_by'], r['created_at'], r['updated_by'], r['updated_at']))
-                    logger.info(f"从 sidebar_menu 迁移 {sm_count} 条数据到 menu 表")
-            except Exception as e:
-                logger.warning(f"迁移 sidebar_menu→menu 失败: {e}")
-            # 清理 sidebar_menu（如果 menu 已有数据则删除旧表）
-            try:
-                cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
-                if cur.fetchone()['cnt'] > 0:
-                    conn.execute("DROP TABLE IF EXISTS sidebar_menu")
-            except sqlite3.OperationalError:
-                pass
-            # 移除 visible_to 列（如果存在）
-            try:
-                conn.execute("ALTER TABLE sidebar_menu DROP COLUMN visible_to")
-            except sqlite3.OperationalError:
-                pass
-            # v4 续: 菜单数据更新
-            logger.info("数据库迁移 v4: 菜单数据更新")
-            # 默认折叠
-            conn.execute("UPDATE menu SET default_expanded=0 WHERE label IN ('系统管理','记账管理','记账设置') AND type='dir'")
-            # 更新账户设置图标
-            conn.execute("UPDATE menu SET icon='💳' WHERE label='账户设置' AND icon='👤'")
-            # 提取记账管理中的科目管理/预算管理/账户设置到独立记账设置目录
-            jz = conn.execute("SELECT id FROM menu WHERE label='记账管理' AND type='dir'").fetchone()
-            if jz:
-                jz_id = jz[0]
-                # 排序记账管理下的页面：页面记账、交易查询、对账管理
-                for order, lab in [(1,'页面记账'),(2,'交易查询'),(3,'对账管理')]:
-                    conn.execute("UPDATE menu SET sort_order=? WHERE label=? AND parent_id=?", (order, lab, jz_id))
-            # 创建记账设置（一级目录）
-            cur = conn.execute("SELECT id FROM menu WHERE label='记账设置' AND type='dir'")
-            if not cur.fetchone():
-                # 将科目管理、预算管理、账户设置设为一级，放到记账设置下面
-                for lab in ('科目管理','预算管理','账户设置'):
-                    conn.execute("UPDATE menu SET parent_id=0, sort_order=99 WHERE label=?", (lab,))
-                conn.execute(
-                    "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (0, 'dir', '记账设置', '⚙️', NULL, 3, 0, 'system')")
-                jz_set_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                for idx, lab in enumerate([('科目管理','📂'),('预算管理','📊'),('账户设置','💳')], 1):
-                    conn.execute(
-                        "UPDATE menu SET parent_id=?, sort_order=? WHERE label=?", (jz_set_id, idx, lab[0]))
-                # 调整记账管理排序
-                conn.execute("UPDATE menu SET sort_order=4 WHERE label='记账管理' AND type='dir'")
-            # 系统管理子项排序
-            sys_mgr = conn.execute("SELECT id FROM menu WHERE label='系统管理' AND type='dir'").fetchone()
-            if sys_mgr:
-                sid = sys_mgr[0]
-                for order, lab in [(1,'用户管理'),(2,'角色管理'),(3,'菜单管理'),(4,'计划任务'),(5,'消息日志')]:
-                    conn.execute("UPDATE menu SET sort_order=? WHERE label=? AND parent_id=?", (order, lab, sid))
-            conn.commit()
-
-            # 初始化账户科目数据
-            cursor = conn.execute("SELECT COUNT(*) as cnt FROM account_category")
-            if cursor.fetchone()['cnt'] == 0:
-                import json as _json, os as _os
-                _cp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'config', 'account_categories.json')
-                try:
-                    with open(_cp, 'r', encoding='utf-8') as _f:
-                        _cd = _json.load(_f)
-                    for _c in _cd:
-                        conn.execute("INSERT INTO account_category (id, name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name",
-                                     (_c['id'], _c['name']))
-                    conn.commit()
-                    logger.info(f"已初始化 {len(_cd)} 个账户科目")
-                except Exception as e:
-                    logger.warning(f"初始化账户科目失败: {e}")
-
-            _set_schema_version(conn, DB_VERSION)
-            conn.commit()
-            logger.info(f"数据库初始化完成: {DB_PATH}, 版本: {DB_VERSION}")
-        else:
-            logger.info(f"数据库版本已是最新: {DB_PATH}, 版本: {DB_VERSION}")
+        # 初始化默认角色、菜单、以及 schema 版本信息
+        _set_schema_version(conn, DB_VERSION)
+        conn.commit()
+        logger.info(f"数据库初始化完成: {DB_PATH}, 版本: {DB_VERSION}")
 
         # 确保默认角色存在（无论是否迁移）
         init_default_roles()
@@ -2467,31 +2354,37 @@ DEFAULT_MENUS = [
 ]
 
 
+def _is_menu_table_incomplete(conn) -> bool:
+    """判断 menu 表是否缺少默认菜单（如仅剩记账设置）。"""
+    cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
+    count = cur.fetchone()['cnt']
+    if count == 0:
+        return False
+    # 如果默认目录缺失，则认为初始化不完整
+    required_roots = {'首页', '系统管理', '记账设置', '记账管理'}
+    rows = conn.execute("SELECT label FROM menu WHERE parent_id=0 AND type='dir'").fetchall()
+    root_labels = {r['label'] for r in rows}
+    if not required_roots.issubset(root_labels):
+        return True
+    # 如果菜单数量非常少，也认为不完整
+    if count < 8:
+        return True
+    return False
+
+
 def init_menus():
     """初始化默认菜单（仅当表为空时写入）并绑定到 admin 角色"""
     conn = get_connection()
     try:
-        # 确保 menu 表中有数据——如果 sidebar_menu 还存在则迁移
-        has_sidebar = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='sidebar_menu'").fetchone()
-        if has_sidebar:
-            sm_count = conn.execute("SELECT COUNT(*) FROM sidebar_menu").fetchone()[0]
-            m_count = conn.execute("SELECT COUNT(*) FROM menu").fetchone()[0]
-            if sm_count > 0 and m_count == 0:
-                rows = conn.execute("SELECT * FROM sidebar_menu").fetchall()
-                for r in rows:
-                    conn.execute(
-                        "INSERT INTO menu (id, parent_id, type, label, icon, url, sort_order, is_active, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (r['id'], r.get('parent_id', 0), r.get('type', 'page'), r['label'], r['icon'],
-                         r.get('url'), r['sort_order'], r['is_active'],
-                         r['created_by'], r['created_at'], r['updated_by'], r['updated_at']))
-                conn.commit()
-                logger.info(f"从 sidebar_menu 迁移 {sm_count} 条数据到 menu 表")
-                return
-
         cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
         if cur.fetchone()['cnt'] > 0:
-            return
+            if _is_menu_table_incomplete(conn):
+                logger.warning("menu 表数据不完整，重新初始化默认菜单")
+                conn.execute("DELETE FROM role_menu")
+                conn.execute("DELETE FROM menu")
+                conn.commit()
+            else:
+                return
         menu_ids = []
         for idx, (typ, parent_ref, icon, label, url, sort_order) in enumerate(DEFAULT_MENUS):
             pid = 0
