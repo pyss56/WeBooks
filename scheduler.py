@@ -182,10 +182,10 @@ class SummaryScheduler:
                     # 有预算汇总：生成查看链接和验证码
                     if with_budget:
                         import uuid as uuid_mod
-                        import random
                         import json
+                        from db import generate_verify_code
                         summary_uuid = str(uuid_mod.uuid4())
-                        verification = f"{random.randint(0,9999):04d}"
+                        verification = generate_verify_code()
                         # 构建结构化图表数据
                         start_time, end_time, period_str = self.summary_service._resolve_range(range_config, 'daily')
                         chart_data = self._build_chart_data(start_time, end_time, user_filter)

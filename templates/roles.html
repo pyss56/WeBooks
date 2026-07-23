@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% block title %}角色管理{% endblock %}
+{% block content %}
+<h2>👥 角色管理</h2>
+<p class="subtitle">管理角色及其菜单访问权限</p>
+
+<div style="display:flex;gap:12px;margin-bottom:16px;">
+  <button class="btn btn-primary" onclick="openCreateModal()">➕ 新增角色</button>
+</div>
+
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+  <div class="table-wrap">
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:#fafafa;border-bottom:1px solid #eee;">
+        <th style="padding:12px 14px;text-align:left;color:#555;">编码</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">名称</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">描述</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;">默认</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;width:120px;">操作</th>
+      </tr>
+    </thead>
+    <tbody id="roleBody">
+      <tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal" style="width:500px;">
+    <h3 id="editTitle">新建角色</h3>
+    <input type="hidden" id="editId">
+    <div class="field">
+      <label>角色编码 <span style="color:#e4393c;">*</span></label>
+      <input type="text" id="editCode" placeholder="如：manager" maxlength="32">
+    </div>
+    <div class="field">
+      <label>角色名称 <span style="color:#e4393c;">*</span></label>
+      <input type="text" id="editName" placeholder="如：经理">
+    </div>
+    <div class="field">
+      <label>描述</label>
+      <input type="text" id="editDesc" placeholder="可选">
+    </div>
+    <div class="field">
+      <label>
+        <input type="checkbox" id="editDefault" value="1">
+        默认角色（新用户自动获得）
+      </label>
+    </div>
+    <div class="btns">
+      <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary" id="editSubmitBtn" onclick="saveRole()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 菜单授权弹窗 -->
+<div class="modal-overlay" id="menuModal">
+  <div class="modal" style="width:620px;">
+    <h3 id="menuTitle">🔐 菜单授权</h3>
+    <p style="font-size:13px;color:#666;margin-bottom:12px;" id="menuRoleName"></p>
+    <input type="hidden" id="menuRoleCode">
+    <div class="field">
+      <label>勾选角色可以访问的菜单</label>
+      <div id="menuTreeContainer" style="max-height:360px;overflow-y:auto;border:1px solid #d9d9d9;border-radius:6px;padding:8px 12px;"></div>
+    </div>
+    <div class="btns">
+      <button class="btn btn-outline" onclick="closeMenuModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveMenuBindings()">保存授权</button>
+    </div>
+  </div>
+</div>
+
+<!-- 绑定用户弹窗 -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal" style="width:550px;">
+    <h3>👤 绑定用户</h3>
+    <p style="font-size:13px;color:#666;margin-bottom:12px;" id="userRoleName"></p>
+    <input type="hidden" id="userRoleCode">
+    <div class="field">
+      <label>选择要赋予此角色的用户</label>
+      <div id="userCheckboxes" style="max-height:300px;overflow-y:auto;border:1px solid #d9d9d9;border-radius:6px;padding:8px 12px;"></div>
+    </div>
+    <div class="btns">
+      <button class="btn btn-outline" onclick="closeUserModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveUserBindings()">保存</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+<style>
+  .badge { display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px; }
+  .badge-yes { background:#e8f5e9;color:#2e7d32; }
+  .badge-no { background:#f5f5f5;color:#999; }
+  table tbody tr:hover { background:#f0f7ff; }
+  table tbody tr:nth-child(even) { background:#fafafa; }
+  .op-btn { padding:4px 8px;border:none;border-radius:3px;font-size:13px;cursor:pointer;background:none; }
+  .op-btn.edit:hover { background:#e3f2fd; }
+  .op-btn.menu:hover { background:#fff3e0; }
+  .op-btn.user:hover { background:#e8f5e9; }
+  .op-btn.del:hover { background:#fce4ec; }
+  /* 菜单树 */
+  .menu-tree { font-size: 13px; }
+  .menu-tree .tree-dir { font-weight:700; color:#444; padding:4px 0; margin-top:6px; border-bottom:1px solid #eee; }
+  .menu-tree .tree-page { padding:3px 0 3px 24px; }
+  .menu-tree .tree-btn { padding:2px 0 2px 48px; font-size:12px; color:#888; }
+  .menu-tree input[type="checkbox"] { margin-right:6px; vertical-align:middle; position:relative; top:-1px; }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+function $(id) { return document.getElementById(id); }
+
+async function loadRoles() {
+  var tbody = $('roleBody');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+  try {
+    var resp = await fetch('/api/roles/list');
+    var result = await resp.json();
+    if (!result.success) throw new Error(result.message);
+    var roles = result.data || [];
+    if (roles.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">暂无角色</td></tr>';
+      return;
+    }
+    var html = '';
+    roles.forEach(function(r) {
+      html += '<tr>';
+      html += '<td style="padding:12px 14px;font-weight:600;">' + escapeHtml(r.code) + '</td>';
+      html += '<td style="padding:12px 14px;">' + escapeHtml(r.name) + '</td>';
+      html += '<td style="padding:12px 14px;color:#888;">' + escapeHtml(r.description || '') + '</td>';
+      html += '<td style="padding:12px 14px;text-align:center;"><span class="badge ' + (r.is_default ? 'badge-yes' : 'badge-no') + '">' + (r.is_default ? '是' : '否') + '</span></td>';
+      html += '<td style="padding:12px 14px;text-align:center;">';
+      html += '<button class="op-btn edit" onclick="openEditModal(' + r.id + ')" title="基本信息">✏️</button>';
+      html += '<button class="op-btn menu" onclick="openMenuModal(' + r.id + ')" title="菜单授权">🔐</button>';
+      html += '<button class="op-btn user" onclick="openUserModal(' + r.id + ')" title="绑定用户">👤</button>';
+      html += '<button class="op-btn del" onclick="deleteRole(' + r.id + ')">🗑️</button>';
+      html += '</td></tr>';
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function openCreateModal() {
+  $('editTitle').textContent = '➕ 新增角色';
+  $('editId').value = '';
+  $('editCode').value = '';
+  $('editCode').disabled = false;
+  $('editName').value = '';
+  $('editDesc').value = '';
+  $('editDefault').checked = false;
+  $('editModal').classList.add('active');
+}
+
+async function openEditModal(id) {
+  $('editTitle').textContent = '✏️ 编辑角色';
+  $('editId').value = id;
+  $('editCode').disabled = true;
+  try {
+    var resp = await fetch('/api/roles/list');
+    var result = await resp.json();
+    var role = (result.data || []).find(function(r) { return r.id === id; });
+    if (!role) { showToast('❌ 角色不存在', 'error'); return; }
+    $('editCode').value = role.code;
+    $('editName').value = role.name;
+    $('editDesc').value = role.description || '';
+    $('editDefault').checked = !!role.is_default;
+    $('editModal').classList.add('active');
+  } catch (e) {
+    showToast('❌ 加载失败: ' + e.message, 'error');
+  }
+}
+
+function closeEditModal() {
+  $('editModal').classList.remove('active');
+}
+
+async function saveRole() {
+  var id = $('editId').value;
+  var code = $('editCode').value.trim();
+  var name = $('editName').value.trim();
+  var desc = $('editDesc').value.trim();
+  var isDefault = $('editDefault').checked;
+  if (!code || !name) { showToast('❌ 编码和名称不能为空', 'error'); return; }
+  var url = id ? '/api/roles/update' : '/api/roles/create';
+  var data = id ? {id: id, name: name, description: desc, is_default: isDefault}
+                : {code: code, name: name, description: desc, is_default: isDefault};
+  try {
+    var resp = await fetch(url, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    var result = await resp.json();
+    if (result.success) { showToast('✅ 已保存', 'success'); closeEditModal(); loadRoles(); }
+    else { showToast('❌ ' + result.message, 'error'); }
+  } catch (e) { showToast('❌ ' + e.message, 'error'); }
+}
+
+/* ── 菜单授权弹窗 ── */
+async function openMenuModal(roleId) {
+  try {
+    var resp2 = await fetch('/api/roles/list');
+    var result2 = await resp2.json();
+    var role = (result2.data || []).find(function(r) { return r.id === roleId; });
+    if (!role) { showToast('❌ 角色不存在', 'error'); return; }
+    $('menuRoleCode').value = role.code;
+    $('menuRoleName').textContent = '角色：' + escapeHtml(role.name) + '（' + escapeHtml(role.code) + '）';
+
+    var [menuResp, bindResp] = await Promise.all([
+      fetch('/api/menus/list'),
+      fetch('/api/roles/get-menu-bindings?role_code=' + encodeURIComponent(role.code))
+    ]);
+    var menuResult = await menuResp.json();
+    var bindResult = await bindResp.json();
+    var allMenus = menuResult.data || [];
+    var bindIds = bindResult.data || [];
+
+    // 构建三级树
+    var byId = {};
+    allMenus.forEach(function(m) { byId[m.id] = m; });
+    var tops = allMenus.filter(function(m) { return !m.parent_id || !byId[m.parent_id]; });
+    tops.sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id; });
+
+    function chk(mid) { return bindIds.indexOf(mid) !== -1 ? 'checked' : ''; }
+    function cb(m) { return '<input type="checkbox" class="menu-chk" value="' + m.id + '" ' + chk(m.id) + '> ' + (m.icon || '📄') + ' ' + escapeHtml(m.label || ''); }
+
+    var html = '<div class="menu-tree">';
+    tops.forEach(function(top) {
+      if (top.type === 'dir') {
+        html += '<div class="tree-dir">' + cb(top) + '</div>';
+        var pages = allMenus.filter(function(m) { return m.parent_id === top.id && m.type === 'page'; });
+        pages.sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id; });
+        pages.forEach(function(p) {
+          html += '<div class="tree-page">' + cb(p) + ' <span style="color:#aaa;">' + escapeHtml(p.url || '') + '</span></div>';
+          var btns = allMenus.filter(function(m) { return m.parent_id === p.id && m.type === 'btn'; });
+          btns.sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id; });
+          btns.forEach(function(b) { html += '<div class="tree-btn">' + cb(b) + '</div>'; });
+        });
+        var dirBtns = allMenus.filter(function(m) { return m.parent_id === top.id && m.type === 'btn'; });
+        dirBtns.sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id; });
+        dirBtns.forEach(function(b) { html += '<div class="tree-btn">' + cb(b) + '</div>'; });
+      } else {
+        html += '<div class="tree-page" style="padding-left:0;">' + cb(top);
+        if (top.url) html += ' <span style="color:#aaa;">' + escapeHtml(top.url) + '</span>';
+        html += '</div>';
+        var btns = allMenus.filter(function(m) { return m.parent_id === top.id && m.type === 'btn'; });
+        btns.sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id; });
+        btns.forEach(function(b) { html += '<div class="tree-btn">' + cb(b) + '</div>'; });
+      }
+    });
+    html += '</div>';
+    $('menuTreeContainer').innerHTML = html || '<div style="color:#999;padding:10px;">暂无菜单</div>';
+    $('menuModal').classList.add('active');
+  } catch (e) {
+    showToast('❌ 加载失败: ' + e.message, 'error');
+  }
+}
+
+function closeMenuModal() {
+  $('menuModal').classList.remove('active');
+}
+
+async function saveMenuBindings() {
+  var roleCode = $('menuRoleCode').value;
+  if (!roleCode) { showToast('❌ 缺少角色编码', 'error'); return; }
+  var chks = document.querySelectorAll('.menu-chk:checked');
+  var menuIds = Array.from(chks).map(function(c) { return parseInt(c.value); });
+  try {
+    var resp = await fetch('/api/roles/set-menu-bindings', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role_code: roleCode, menu_ids: menuIds})
+    });
+    var result = await resp.json();
+    if (result.success) { showToast('✅ 菜单授权已保存', 'success'); closeMenuModal(); }
+    else { showToast('❌ ' + result.message, 'error'); }
+  } catch (e) { showToast('❌ ' + e.message, 'error'); }
+}
+
+/* ── 绑定用户弹窗 ── */
+async function openUserModal(roleId) {
+  try {
+    var resp2 = await fetch('/api/roles/list');
+    var result2 = await resp2.json();
+    var role = (result2.data || []).find(function(r) { return r.id === roleId; });
+    if (!role) { showToast('❌ 角色不存在', 'error'); return; }
+    $('userRoleCode').value = role.code;
+    $('userRoleName').textContent = '角色：' + escapeHtml(role.name) + '（' + escapeHtml(role.code) + '）';
+
+    var [userResp, bindResp] = await Promise.all([
+      fetch('/api/users/list'),
+      fetch('/api/roles/users?role_code=' + encodeURIComponent(role.code))
+    ]);
+    var userResult = await userResp.json();
+    var bindResult = await bindResp.json();
+    var users = userResult.data || [];
+    var boundCodes = bindResult.data || [];
+
+    var html = '';
+    users.forEach(function(u) {
+      var checked = boundCodes.indexOf(u.code) !== -1 ? 'checked' : '';
+      html += '<label style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f5f5f5;cursor:pointer;">';
+      html += '<input type="checkbox" class="user-chk" value="' + escapeHtml(u.code) + '" ' + checked + ' style="width:15px;height:15px;">';
+      html += '<span>' + escapeHtml(u.name) + ' <span style="color:#999;font-size:11px;">(' + escapeHtml(u.code) + ')</span></span>';
+      html += '</label>';
+    });
+    $('userCheckboxes').innerHTML = html || '<div style="color:#999;padding:10px;text-align:center;">暂无用户</div>';
+    $('userModal').classList.add('active');
+  } catch (e) {
+    showToast('❌ 加载失败: ' + e.message, 'error');
+  }
+}
+
+function closeUserModal() {
+  $('userModal').classList.remove('active');
+}
+
+async function saveUserBindings() {
+  var roleCode = $('userRoleCode').value;
+  if (!roleCode) { showToast('❌ 缺少角色编码', 'error'); return; }
+  var chks = document.querySelectorAll('.user-chk:checked');
+  var userCodes = Array.from(chks).map(function(c) { return c.value; });
+  try {
+    var resp = await fetch('/api/roles/set-users', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role_code: roleCode, user_codes: userCodes})
+    });
+    var result = await resp.json();
+    if (result.success) { showToast('✅ 用户绑定已保存', 'success'); closeUserModal(); }
+    else { showToast('❌ ' + result.message, 'error'); }
+  } catch (e) { showToast('❌ ' + e.message, 'error'); }
+}
+
+async function deleteRole(id) {
+  if (!confirm('确定删除该角色？')) return;
+  try {
+    var resp = await fetch('/api/roles/delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id})
+    });
+    var result = await resp.json();
+    if (result.success) { showToast('✅ 已删除', 'success'); loadRoles(); }
+    else { showToast('❌ ' + result.message, 'error'); }
+  } catch (e) {
+    showToast('❌ ' + e.message, 'error');
+  }
+}
+
+loadRoles();
+{% endblock %}

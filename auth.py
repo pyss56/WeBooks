@@ -37,13 +37,55 @@ def _clear_attempts(ip: str):
 
 
 def login_required(f):
-    """需要管理员登录的页面装饰器，未登录跳转到 /login"""
+    """需要登录的页面装饰器（管理员或项目用户），未登录跳转到 /login"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('authenticated') and not session.get('user_code'):
+            return redirect(url_for('auth_login', next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def admin_required(f):
+    """需要管理员权限的装饰器，非管理员返回 403"""
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get('authenticated'):
             return redirect(url_for('auth_login', next=request.path))
+        if not session.get('is_admin'):
+            return '权限不足，仅管理员可操作', 403
         return f(*args, **kwargs)
     return decorated
+
+
+def menu_button_required(menu_url=None):
+    """需要菜单按键权限的装饰器，通过角色检查是否有 button 权限
+    用法: @menu_button_required('/api/users/bind-wx')
+    管理员自动拥有所有权限（跳过检查）。
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if not session.get('authenticated'):
+                return redirect(url_for('auth_login', next=request.path))
+            # 管理员直接放行
+            if session.get('is_admin'):
+                return f(*args, **kwargs)
+            # 非管理员检查菜单权限
+            user_code = session.get('user_code')
+            if not user_code:
+                return '未登录', 401
+            from db import check_user_menu_permission
+            if not check_user_menu_permission(user_code, menu_url):
+                return '权限不足，请联系管理员', 403
+            return f(*args, **kwargs)
+        return decorated
+    if callable(menu_url):
+        # 无参数用法 @menu_button_required
+        f = menu_url
+        menu_url = None
+        return decorator(f)
+    return decorator
 
 
 LOGIN_HTML = """
@@ -51,7 +93,7 @@ LOGIN_HTML = """
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>管理员登录</title>
+<title>登录 - WeBooks</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -64,7 +106,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #f
 .card .field { margin-bottom: 16px; text-align: left; }
 .card .field label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
 .card .field input { width: 100%; padding: 10px 14px; border: 1px solid #d9d9d9; border-radius: 6px;
-  font-size: 15px; outline: none; transition: border-color .2s; }
+  font-size: 15px; outline: none; transition: border-color .2s; box-sizing: border-box; }
 .card .field input:focus { border-color: #07c160; box-shadow: 0 0 0 2px rgba(7,193,96,.15); }
 .card .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 15px;
   cursor: pointer; background: #07c160; color: #fff; }
@@ -75,7 +117,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #f
 <body>
 <div class="card">
   <h1>WeBooks</h1>
-  <div class="sub">请输入管理员账号密码</div>
+  <div class="sub">企业微信记账助手</div>
   <form method="post" action="{% if entry_code %}/{{ entry_code }}{% endif %}/login">
     <div class="field">
       <label>用户名</label>
@@ -111,21 +153,31 @@ def init_auth_routes(app, config):
             password = request.form.get('password', '')
             if not username:
                 error = '请输入用户名'
-            elif not config.ADMIN_PASSWORD:
-                error = '未配置管理员密码（ADMIN_PASSWORD）'
+            elif not password:
+                error = '请输入密码'
             elif not _check_rate_limit(ip):
                 error = '登录尝试过于频繁，请10分钟后再试'
-            elif username != config.ADMIN_USERNAME:
-                _record_fail(ip)
-                error = '用户名或密码错误'
-            elif password == config.ADMIN_PASSWORD:
-                session['authenticated'] = True
-                _clear_attempts(ip)
-                return redirect(next_url)
             else:
-                _record_fail(ip)
-                remaining = 5 - _login_attempts.get(ip, {}).get('count', 0)
-                error = f'用户名或密码错误，还可尝试 {remaining} 次'
+                # 全部走数据库验证
+                from db import get_user_by_login, verify_user_password
+                user = get_user_by_login(username)
+                if not user:
+                    _record_fail(ip)
+                    error = '用户名或密码错误'
+                elif not verify_user_password(user['code'], password):
+                    _record_fail(ip)
+                    remaining = 5 - _login_attempts.get(ip, {}).get('count', 0)
+                    error = f'用户名或密码错误，还可尝试 {remaining} 次'
+                else:
+                    from db import get_user_role_codes
+                    session.permanent = True
+                    session['authenticated'] = True
+                    session['user_code'] = user['code']
+                    session['username'] = user['name']
+                    session['is_admin'] = bool(user.get('is_admin', 0))
+                    session['role_codes'] = get_user_role_codes(user['code'])
+                    _clear_attempts(ip)
+                    return redirect(next_url)
         return app.response_class(
             render_template_string(LOGIN_HTML, error=error, next=next_url, username=username, entry_code=_entry_code),
             mimetype='text/html'
@@ -133,5 +185,5 @@ def init_auth_routes(app, config):
 
     @app.route('/logout')
     def auth_logout():
-        session.pop('authenticated', None)
+        session.clear()
         return redirect(url_for('auth_login'))

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#07c160"/>
+      <stop offset="100%" stop-color="#059e4f"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="40" fill="url(#bg)"/>
+  <text x="96" y="108" font-size="72" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="700">W</text>
+  <text x="96" y="148" font-size="24" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-family="sans-serif" font-weight="500">记账</text>
+</svg>

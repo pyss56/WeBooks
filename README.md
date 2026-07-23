@@ -52,6 +52,17 @@
 - **自定义 SQL**：支持 `{filter_user}` 变量，自定义标题和行格式模板
 - **执行明细**：有预算汇总任务自动生成验证码 + 图表查看页面，7天有效
 
+### 📱 PWA 支持
+- 支持 Chrome/Edge 浏览器将应用安装到桌面，像原生 App 一样使用
+- 侧边栏底部点击 **📲 安装** 即可安装
+- 安装后支持离线缓存、独立窗口运行
+
+### 🔐 角色与权限管理
+- **角色管理**（`/roles`）：创建角色，为角色分配菜单和按钮级权限
+- **菜单管理**（`/menu`）：自定义侧边栏菜单结构（目录/页面/按钮三级）
+- **按钮权限**：所有写操作 API 均受按钮权限控制，管理员（is_admin）放行
+- **用户管理**（`/user`）：创建用户、设置密码、绑定微信、分配角色
+
 ### 📊 汇总图表
 - 有预算汇总任务推送消息仅包含总预算、总支出、剩余、占比
 - 消息附带 4 位验证码和链接
@@ -89,7 +100,7 @@ cd WeBooks
 cp .env.sample .env
 ```
 
-完整配置项请参考 `docker-compose.sample.yml` 文件。
+所有环境变量说明详见 `docker-compose.sample.yml` 和 `.env.sample` 文件。
 
 ### 3. 安装依赖
 
@@ -104,105 +115,38 @@ python app.py
 ```
 服务启动在 `http://0.0.0.0:5001`
 
-Windows 下也可直接运行 `start.cmd`（自动激活虚拟环境）。
+Windows 下也可直接运行 `start.cmd`。
 
 ## 菜单结构
 
-| 一级菜单 | 子按钮 |
+| 一级菜单 | 子菜单 |
 |---------|--------|
-| 家庭 | 今日汇总、本月汇总 |
-| 个人 | 我的今日、我的本月、他人今日、他人本月、快捷转账 |
-| 更多 | 后台管理、转账设置、切换账户、使用帮助 |
+| 🏠 首页 | - |
+| ⚙️ 系统管理 | 用户管理、角色管理、菜单管理、计划任务、消息日志 |
+| ⚙️ 记账设置 | 科目管理、预算管理、账户设置 |
+| 📒 记账管理 | 页面记账、交易查询、对账管理 |
 
 ## 管理后台页面
 
 | 路径 | 说明 |
 |------|------|
 | `/` | 首页 - 本月预算执行进度 |
-| `/manage` | 交易管理（查看/编辑/删除） |
+| `/user` | 用户管理 |
+| `/roles` | 角色管理 |
+| `/menu` | 菜单管理 |
+| `/manage` | 交易管理 |
 | `/accounts` | 账户管理 |
 | `/categories` | 科目管理 |
-| `/users` | 用户管理（绑定平台账号） |
-| `/budgets` | 预算管理（家庭/个人，按月切换） |
-| `/scheduled-tasks` | 计划任务管理（创建/编辑/删除/执行） |
+| `/budgets` | 预算管理 |
+| `/scheduled-tasks` | 计划任务 |
 | `/aliases` | 别名管理 |
 | `/message-log` | 消息日志 |
 | `/reconciliation` | 对账管理 |
-| `/s/t/<uuid>` | 汇总图表查看（验证码保护，7天有效） |
+| `/add-transaction` | 页面记账 |
+| `/transaction` | 交易查询 |
 
 ## Docker 部署
 
 ```bash
 docker-compose -f docker-compose.sample.yml up -d
-```
-
-## 环境变量说明
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `SECRET_KEY` | 随机生成 | Flask 密钥 |
-| `LOG_LEVEL` | `INFO` | 日志级别 |
-| `LOG_RETENTION_DAYS` | `60` | 日志保留天数 |
-| `WECOM_CORP_ID` | - | 企业微信 CorpID |
-| `WECOM_AGENT_ID` | - | 企业微信 AgentID |
-| `WECOM_CORP_SECRET` | - | 企业微信 Secret |
-| `WECOM_TOKEN` | - | 企业微信 Token |
-| `WECOM_ENCODING_AES_KEY` | - | 企业微信 EncodingAESKey |
-| `TIMEZONE` | `Asia/Shanghai` | 时区 |
-| `ADMIN_USERNAME` | `admin` | 管理后台用户名 |
-| `ADMIN_PASSWORD` | - | 管理后台密码 |
-| `BASE_URL` | - | 服务外部访问地址 |
-| `WEB_ENTRY_CODE` | - | PC端访问入口编码（企业微信主页URL子路径） |
-| `WEB_ENTRY_REDIRECT` | - | 未带入口编码时的跳转地址 |
-| `WECOM_OAUTH_ENABLED` | `false` | 企业微信 OAuth 登录开关（汇总图表免验证码） |
-
-> **OAuth 要求**：`BASE_URL` 必须为 HTTPS（443端口），域名须在企业微信管理后台配置为可信域名。
-> 回调路径：`{BASE_URL}/{WEB_ENTRY_CODE}/s/cb/{uuid}`
-| `/qywx/callback` | GET/POST | 企业微信回调 |
-| `/api/qywx/sync_menu` | POST | 同步自定义菜单 |
-| `/api/test/send` | POST | 测试发送消息 |
-| `/` | GET | 首页（预算概览，需登录） |
-| `/api/admin/budget-summary` | GET | 预算汇总数据（柱状图用，需登录） |
-| `/admin/manage` | GET | 后台管理首页（需登录） |
-| `/admin/status` | GET | API状态页面（需登录） |
-| `/category/manage` | GET | 科目管理页面（需登录） |
-| `/api/categories/list` | GET | 获取全部科目 |
-| `/api/categories/add` | POST | 新增科目 |
-| `/api/categories/modify` | POST | 修改科目 |
-| `/api/categories/delete` | POST | 删除科目 |
-| `/budget/manage` | GET | 预算管理页面（需登录） |
-| `/api/budget/save` | POST | 保存预算 |
-| `/api/budget/copy-last-month` | POST | 从上月复制预算 |
-| `/transaction` | GET | 交易查询页面（需登录） |
-| `/api/transactions/list` | GET | 查询交易列表 |
-| `/api/transactions/modify` | POST | 修改交易 |
-| `/api/transactions/delete` | POST | 删除交易 |
-| `/tx/<uuid>` | GET | UUID 交易详情页（无需登录） |
-| `/api/transactions/by-uuid/update` | POST | UUID 更新交易 |
-| `/api/transactions/by-uuid/delete` | POST | UUID 删除交易 |
-| `/reconciliation` | GET | 对账管理页面（需登录） |
-| `/api/reconciliation/list` | GET | 对账列表 |
-| `/api/reconciliation/create` | POST | 创建对账 |
-| `/api/reconciliation/detail` | GET | 对账详情 |
-| `/api/reconciliation/add-transactions` | POST | 添加交易到对账 |
-| `/api/reconciliation/remove-transactions` | POST | 从对账移除交易 |
-| `/api/reconciliation/confirm` | POST | 确认对账 |
-| `/api/reconciliation/cancel` | POST | 取消对账 |
-| `/account/manage` | GET | 账户管理页面（需登录） |
-| `/api/accounts` | GET | 获取账户列表 |
-| `/api/accounts/create` | POST | 新增账户 |
-| `/api/accounts/modify` | POST | 修改账户 |
-| `/api/accounts/delete` | POST | 删除账户 |
-| `/users/manage` | GET | 用户管理页面（需登录） |
-| `/api/users/list` | GET | 用户列表 |
-| `/api/users/create` | POST | 新建用户 |
-| `/api/users/update` | POST | 更新用户 |
-| `/api/users/delete` | POST | 删除用户 |
-| `/login` | GET/POST | 登录 |
-| `/logout` | GET | 退出登录 |
-
-## 架构
-
-```text
-用户 → 企业微信 → 回调 → WeBooks → SQLite
 ```

@@ -2,7 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#07c160">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="{{ app_name }}">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/static/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <title>{% block title %}后台管理{% endblock %} - {{ app_name }}</title>
     <link rel="stylesheet" href="https://maxst.icons8.com/vue-static/landings/line-awesome/line-awesome/1.3.0/css/line-awesome.min.css">
     <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/line-awesome/1.3.0/line-awesome/css/line-awesome.min.css" onerror="this.remove()">
@@ -25,9 +33,72 @@
             top: 0;
             height: 100vh;
             overflow-y: auto;
-            transition: width 0.25s ease;
+            transition: width 0.25s ease, transform 0.25s ease;
+            z-index: 100;
         }
         .sidebar.collapsed { width: 60px; }
+        /* ── 移动端适配 ── */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar {
+                width: 100% !important;
+                height: auto;
+                min-height: auto;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 999;
+                padding: 0;
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+                transform: translateY(-100%);
+                transition: transform 0.3s ease;
+                max-height: 85vh;
+                overflow-y: auto;
+            }
+            .sidebar.open { transform: translateY(0); }
+            .sidebar .sidebar-header { padding: 12px 16px; }
+            .sidebar .sidebar-footer { display: block; padding: 12px 16px; font-size: 11px; }
+            .sidebar-inner { padding-bottom: 60px; }
+            .main-content {
+                padding: 60px 12px 20px !important;
+                width: 100%;
+            }
+            .sidebar-menu li a { padding: 14px 16px !important; font-size: 15px !important; }
+            .sidebar-submenu li a { padding: 12px 16px 12px 36px !important; }
+            /* 移动端浮动菜单按钮 */
+            .mobile-menu-btn {
+                display: flex !important;
+                position: fixed; top: 8px; left: 8px; z-index: 1000;
+                width: 40px; height: 40px;
+                background: #07c160; color: #fff;
+                border: none; border-radius: 8px;
+                align-items: center; justify-content: center;
+                font-size: 20px; cursor: pointer;
+                box-shadow: 0 2px 8px rgba(0,0,0,.15);
+            }
+            .mobile-menu-overlay {
+                display: none;
+                position: fixed; inset: 0; background: rgba(0,0,0,.3);
+                z-index: 998;
+            }
+            .mobile-menu-overlay.show { display: block; }
+        }
+        @media (min-width: 769px) {
+            .mobile-menu-btn, .mobile-menu-overlay { display: none !important; }
+        }
+        /* 表格移动端滚动 */
+        @media (max-width: 768px) {
+            .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .table-wrap table { min-width: 700px; }
+            .modal { width: 95vw !important; max-width: 95vw !important; }
+            .card { max-width: 100% !important; }
+            .field input, .field select { padding: 12px !important; font-size: 16px !important; }
+            .btn { padding: 12px 20px !important; font-size: 15px !important; }
+            h2 { font-size: 18px !important; }
+            .subtitle { font-size: 13px !important; }
+        }
         .sidebar-header {
             display: flex;
             align-items: center;
@@ -74,7 +145,7 @@
             white-space: nowrap;
             overflow: hidden;
         }
-        .sidebar-menu li a:hover {
+        .sidebar-menu > li > a:hover {
             background: #f0f7ff;
             color: #1a73e8;
         }
@@ -84,6 +155,46 @@
             font-weight: 600;
             border-right: 3px solid #1a73e8;
         }
+        /* 一级菜单 */
+        .sidebar-menu > li > a {
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .sidebar-menu > li.menu-dir > .dir-header {
+            font-weight: 700;
+            color: #444;
+            font-size: 13px;
+            cursor: default;
+            border-bottom: 1px solid #f0f0f0;
+            margin: 4px 12px;
+            padding: 8px 8px;
+            border-radius: 6px;
+        }
+        .sidebar-menu > li.menu-dir > .dir-header:hover {
+            background: #f8f8f8;
+        }
+        /* 二级菜单（子页面） */
+        .sidebar-submenu li a {
+            padding: 8px 20px 8px 40px;
+            font-size: 13px;
+            font-weight: 400;
+            color: #666;
+            border-left: 2px solid transparent;
+        }
+        .sidebar-submenu li a:hover {
+            background: #f0f7ff;
+            color: #1a73e8;
+            border-left-color: #1a73e8;
+        }
+        .sidebar-submenu li a.active {
+            background: #e8f0fe;
+            color: #1a73e8;
+            font-weight: 600;
+            border-left-color: #1a73e8;
+            border-right: none;
+        }
+        .sidebar-submenu li a .icon { font-size: 14px; }
+        .sidebar.collapsed .sidebar-submenu { display: none; }
         .sidebar-menu li a .icon {
             width: 20px;
             text-align: center;
@@ -221,32 +332,116 @@
             <button class="sidebar-toggle" onclick="toggleSidebar()" title="折叠菜单">◀</button>
         </div>
         <div class="sidebar-inner">
-        <ul class="sidebar-menu">
-            <li><a href="/" class="{% block nav_home %}{% endblock %}"><span class="icon">🏠</span><span class="label">首页</span></a></li>
-            <li><a href="/categories" class="{% block nav_category %}{% endblock %}"><span class="icon">📂</span><span class="label">科目管理</span></a></li>
-            <li><a href="/budgets" class="{% block nav_budget %}{% endblock %}"><span class="icon">📊</span><span class="label">预算管理</span></a></li>
-            <li><a href="/accounts" class="{% block nav_account %}{% endblock %}"><span class="icon">👤</span><span class="label">账户设置</span></a></li>
-            
-            <li><a href="/transaction" class="{% block nav_bills %}{% endblock %}"><span class="icon">💰</span><span class="label">交易查询</span></a></li>
-            <li><a href="/reconciliation" class="{% block nav_reconciliation %}{% endblock %}"><span class="icon">✅</span><span class="label">对账管理</span></a></li>
-            
-            <li><a href="/message-log" class="{% block nav_message_log %}{% endblock %}"><span class="icon">📋</span><span class="label">消息日志</span></a></li>
-
-            <li><a href="/user" class="{% block nav_users %}{% endblock %}"><span class="icon">👥</span><span class="label">用户管理</span></a></li>
-            <li><a href="/scheduled-tasks" class="{% block nav_scheduler %}{% endblock %}"><span class="icon">⏰</span><span class="label">计划任务</span></a></li>
+        <ul class="sidebar-menu" id="sidebarMenu">
+            {% for item in menu_tree %}
+              {% if item.type == 'dir' %}
+                <li class="menu-dir">
+                  <a href="#" onclick="toggleDir(this);return false;" class="dir-header">
+                    <span class="icon">{{ item.icon }}</span>
+                    <span class="label">{{ item.label }}</span>
+                    <span class="dir-arrow" style="margin-left:auto;font-size:10px;color:#bbb;transition:transform .2s;">▾</span>
+                  </a>
+                  {% if item.children %}
+                  <ul class="sidebar-submenu" style="list-style:none;padding:0;margin:0;overflow:hidden;max-height:0;transition:max-height .25s ease;"
+                      data-default-expanded="{{ item.default_expanded|default(1) }}">
+                    {% for child in item.children %}
+                    <li>
+                      <a href="{{ child.url }}" class="{% if child.url == request.path %}active{% elif child.url and request.path.startswith(child.url) and child.url != '/' %}active{% endif %}">
+                        <span class="icon">{{ child.icon }}</span>
+                        <span class="label">{{ child.label }}</span>
+                      </a>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                </li>
+              {% else %}
+                <li>
+                  <a href="{{ item.url }}" class="{% if item.url == request.path %}active{% elif item.url and request.path.startswith(item.url) and item.url != '/' %}active{% endif %}">
+                    <span class="icon">{{ item.icon }}</span>
+                    <span class="label">{{ item.label }}</span>
+                  </a>
+                </li>
+              {% endif %}
+            {% endfor %}
         </ul>
+        <script>
+        function toggleDir(a) {
+          var li = a.closest('li.menu-dir');
+          if (!li) return;
+          var sub = li.querySelector('.sidebar-submenu');
+          if (!sub) return;
+          var collapsed = sub.style.maxHeight === '0px' || !sub.style.maxHeight;
+          sub.style.maxHeight = collapsed ? sub.scrollHeight + 'px' : '0px';
+          var arrow = a.querySelector('.dir-arrow');
+          if (arrow) arrow.style.transform = collapsed ? 'rotate(180deg)' : '';
+        }
+        (function() {
+          // 默认展开当前活跃页面所在的目录
+          var active = document.querySelector('#sidebarMenu a.active');
+          if (active) {
+            var li = active.closest('li');
+            if (li) {
+              var sub = li.closest('.sidebar-submenu');
+              if (sub) {
+                sub.style.maxHeight = sub.scrollHeight + 'px';
+                var dirLi = sub.closest('li.menu-dir');
+                if (dirLi) {
+                  var arrow = dirLi.querySelector('.dir-arrow');
+                  if (arrow) arrow.style.transform = 'rotate(180deg)';
+                }
+              }
+            }
+          }
+        })();
+        </script>
         </div>
         <div class="sidebar-footer">
-            <div style="margin-bottom:6px;">WeBooks v{{ version }}</div>
+            <div style="margin-bottom:4px;font-size:12px;color:#888;">{{ app_name }} v{{ version }}</div>
+            <div style="font-size:11px;color:#aaa;margin-bottom:6px;">
+              {% if session.get('is_admin') %}👑 {{ session['username'] }}{% elif session.get('username') %}👤 {{ session['username'] }}{% endif %}
+            </div>
             <hr style="border:none;border-top:1px solid #eee;margin:6px 0;">
-            <div><a href="/logout" style="font-size:12px;color:#999;text-decoration:none;">🚪 退出登录</a></div>
+            <div style="display:flex;gap:6px;justify-content:center;">
+                <a href="#" onclick="event.preventDefault();showChangePwdModal();" style="font-size:12px;color:#999;text-decoration:none;">🔑 改密</a>
+                <span style="color:#ddd;">|</span>
+                <a href="#" id="installPwaBtn" onclick="event.preventDefault();installPWA();" style="font-size:12px;color:#999;text-decoration:none;display:none;">📲 安装</a>
+                <span id="installSep" style="color:#ddd;display:none;">|</span>
+                <a href="/logout" style="font-size:12px;color:#999;text-decoration:none;">🚪 退出</a>
+            </div>
         </div>
     </div>
+<button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileMenu()">☰</button>
+    <div class="mobile-menu-overlay" id="mobileMenuOverlay" onclick="toggleMobileMenu()"></div>
     <div class="main-content">
         {% block content %}{% endblock %}
     </div>
 
     <div class="toast" id="toast"></div>
+
+    <!-- 修改密码弹窗 -->
+    <div class="modal-overlay" id="changePwdModal">
+      <div class="modal" style="width:400px;">
+        <h3>🔑 修改密码</h3>
+        <div class="field">
+          <label>当前密码</label>
+          <input type="password" id="cpOldPwd" placeholder="请输入当前密码" onkeydown="if(event.key==='Enter') $('cpNewPwd').focus()">
+        </div>
+        <div class="field">
+          <label>新密码</label>
+          <input type="password" id="cpNewPwd" placeholder="至少4位" onkeydown="if(event.key==='Enter') $('cpConfirmPwd').focus()">
+        </div>
+        <div class="field">
+          <label>确认新密码</label>
+          <input type="password" id="cpConfirmPwd" placeholder="再次输入新密码" onkeydown="if(event.key==='Enter') submitChangePwd()">
+        </div>
+        <div id="cpError" style="display:none;background:#fce4ec;color:#c62828;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:12px;"></div>
+        <div class="btns">
+          <button class="btn btn-outline" onclick="closeChangePwdModal()">取消</button>
+          <button class="btn btn-primary" id="cpBtn" onclick="submitChangePwd()">确认修改</button>
+        </div>
+      </div>
+    </div>
 
     <script>
         function showToast(msg, type) {
@@ -260,12 +455,41 @@
             if (!str) return '';
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+        /* ── 可复用：填充用户选择下拉 ── */
+        function populateUserSelector(selId, selectedValue) {
+            var sel = document.getElementById(selId);
+            if (!sel || sel.tagName !== 'SELECT') return;
+            sel.innerHTML = '<option value="">加载中...</option>';
+            fetch('/api/users/list')
+                .then(function(r) { return r.json(); })
+                .then(function(result) {
+                    sel.innerHTML = '<option value="">-- 不修改 --</option>';
+                    if (result.success && result.data) {
+                        result.data.forEach(function(u) {
+                            var opt = document.createElement('option');
+                            opt.value = u.code;
+                            opt.textContent = u.name + ' (' + u.code + ')';
+                            if (u.code === selectedValue) opt.selected = true;
+                            sel.appendChild(opt);
+                        });
+                    }
+                })
+                .catch(function() {
+                    sel.innerHTML = '<option value="">加载失败</option>';
+                });
+        }
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             const isCollapsed = sidebar.classList.toggle('collapsed');
             const btn = sidebar.querySelector('.sidebar-toggle');
             btn.textContent = isCollapsed ? '▶' : '◀';
             try { localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0'); } catch(e) {}
+        }
+        function toggleMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobileMenuOverlay');
+            const isOpen = sidebar.classList.toggle('open');
+            overlay.classList.toggle('show', isOpen);
         }
         (function() {
             try {
@@ -275,7 +499,131 @@
                 }
             } catch(e) {}
         })();
+        /* 展开当前页面所在目录 */
+        (function() {
+            var menu = document.getElementById('sidebarMenu');
+            if (!menu) return;
+            menu.querySelectorAll('.sidebar-submenu').forEach(function(sub) {
+                var expanded = sub.getAttribute('data-default-expanded');
+                var isExpanded = expanded === '1';
+                if (isExpanded) {
+                    sub.style.maxHeight = sub.scrollHeight + 'px';
+                    var arrow = sub.closest('.menu-dir')?.querySelector('.dir-arrow');
+                    if (arrow) arrow.style.transform = 'rotate(180deg)';
+                }
+            });
+            // 如果有活跃页面，展开其所在目录
+            var active = menu.querySelector('.sidebar-submenu a.active');
+            if (active) {
+                var sub = active.closest('.sidebar-submenu');
+                if (sub && (!sub.style.maxHeight || sub.style.maxHeight === '0px')) {
+                    sub.style.maxHeight = sub.scrollHeight + 'px';
+                    var arrow = sub.closest('.menu-dir')?.querySelector('.dir-arrow');
+                    if (arrow) arrow.style.transform = 'rotate(180deg)';
+                }
+            }
+        })();
+
+        /* ── 修改密码 ── */
+        function showChangePwdModal() {
+            document.getElementById('changePwdModal').classList.add('active');
+            document.getElementById('cpOldPwd').value = '';
+            document.getElementById('cpNewPwd').value = '';
+            document.getElementById('cpConfirmPwd').value = '';
+            document.getElementById('cpError').style.display = 'none';
+            setTimeout(function() { document.getElementById('cpOldPwd').focus(); }, 100);
+        }
+        function closeChangePwdModal() {
+            document.getElementById('changePwdModal').classList.remove('active');
+        }
+        async function submitChangePwd() {
+            var oldPwd = document.getElementById('cpOldPwd').value;
+            var newPwd = document.getElementById('cpNewPwd').value;
+            var confirmPwd = document.getElementById('cpConfirmPwd').value;
+            var errEl = document.getElementById('cpError');
+            if (!oldPwd) { errEl.textContent = '请输入当前密码'; errEl.style.display = 'block'; return; }
+            if (!newPwd || newPwd.length < 4) { errEl.textContent = '新密码至少4位'; errEl.style.display = 'block'; return; }
+            if (newPwd !== confirmPwd) { errEl.textContent = '两次密码不一致'; errEl.style.display = 'block'; return; }
+            errEl.style.display = 'none';
+            var btn = document.getElementById('cpBtn');
+            btn.disabled = true; btn.textContent = '提交中...';
+            try {
+                var resp = await fetch('/api/users/change-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({old_password: oldPwd, new_password: newPwd}),
+                });
+                var result = await resp.json();
+                if (result.success) {
+                    showToast('✅ 密码已修改', 'success');
+                    closeChangePwdModal();
+                } else {
+                    errEl.textContent = result.message || '修改失败';
+                    errEl.style.display = 'block';
+                }
+            } catch (e) {
+                errEl.textContent = '网络错误';
+                errEl.style.display = 'block';
+            } finally {
+                btn.disabled = false; btn.textContent = '确认修改';
+            }
+        }
+
         {% block extra_script %}{% endblock %}
+    </script>
+
+    <!-- PWA Service Worker 注册 & 安装按钮 -->
+    <script>
+    // ---------- PWA: 延迟安装提示 ----------
+    var deferredPrompt = null;
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js').then(function(reg) {
+                console.log('[PWA] SW 注册成功，作用域:', reg.scope);
+            }).catch(function(err) {
+                console.warn('[PWA] SW 注册失败:', err);
+            });
+        });
+    }
+    window.addEventListener('beforeinstallprompt', function(e) {
+        // 阻止 Chrome 自动弹出安装栏，由我们自定义按钮触发
+        e.preventDefault();
+        deferredPrompt = e;
+        // 显示安装按钮
+        var btn = document.getElementById('installPwaBtn');
+        var sep = document.getElementById('installSep');
+        if (btn) btn.style.display = '';
+        if (sep) sep.style.display = '';
+        console.log('[PWA] 已捕获 beforeinstallprompt，安装按钮已显示');
+    });
+    window.addEventListener('appinstalled', function() {
+        // 安装成功后隐藏按钮
+        deferredPrompt = null;
+        var btn = document.getElementById('installPwaBtn');
+        var sep = document.getElementById('installSep');
+        if (btn) btn.style.display = 'none';
+        if (sep) sep.style.display = 'none';
+        console.log('[PWA] 应用已安装');
+    });
+    function installPWA() {
+        if (!deferredPrompt) {
+            alert('安装提示暂不可用，请尝试在浏览器菜单中手动安装');
+            return;
+        }
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function(choiceResult) {
+            if (choiceResult.outcome === 'accepted') {
+                console.log('[PWA] 用户已接受安装');
+            } else {
+                console.log('[PWA] 用户已取消安装');
+            }
+            deferredPrompt = null;
+            var btn = document.getElementById('installPwaBtn');
+            var sep = document.getElementById('installSep');
+            if (btn) btn.style.display = 'none';
+            if (sep) sep.style.display = 'none';
+        });
+    }
     </script>
 </body>
 </html>

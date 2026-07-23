@@ -451,13 +451,12 @@ class TransactionService:
             link = ''
             tx_code = ''
             if tx_uuid:
-                from config import get_config
-                _c = get_config()
-                # 用 UUID 字符码求和生成确定性验证码
-                tx_code = f"{sum(ord(c) for c in tx_uuid) % 10000:04d}"
-                if _c.BASE_URL:
-                    entry = _c.WEB_ENTRY_CODE or ''
-                    link = f'\n📊 点击查看/修改（验证码：{tx_code}）'
+                # 使用数据库保存的验证码（与 add_transaction 一致）
+                tx_code = result.get('result', {}).get('verify_code', '')
+            if tx_uuid and tx_code:
+                    from config import get_config
+                    _c = get_config()
+                    link = f'\n📊 编辑验证码：{tx_code}'
             return {
                 'success': True,
                 'id': result.get('result', {}).get('id', ''),
@@ -624,7 +623,7 @@ class TransactionService:
                 from config import get_config
                 _c = get_config()
                 if _c.BASE_URL:
-                    link = f'\n📊 点击查看/修改（验证码：{vcode}）'
+                    link = f'\n📊 编辑验证码：{vcode}'
             return {
                 'success': True, 'id': result.get('result', {}).get('id', ''),
                 'uuid': tx_uuid, 'verify_code': vcode, 'resolved_category_name': resolved_name,
@@ -665,7 +664,7 @@ class TransactionService:
                 from config import get_config
                 _c = get_config()
                 if _c.BASE_URL:
-                    link = f'\n📊 点击查看/修改（验证码：{vcode}）'
+                    link = f'\n📊 编辑验证码：{vcode}'
             # 获取实际科目名称（已由科目选择阶段确定）
             from db import get_connection
             _conn = get_connection()

@@ -75,13 +75,21 @@ def _process_message(msg_data: dict) -> str:
 
     if msg_type == 'text':
         content = msg_data.get('Content', '')
-        reply_content = message_handler.handle_text_message(
-            content, from_user, message_log_id=message_log_id)
+        try:
+            reply_content = message_handler.handle_text_message(
+                content, from_user, message_log_id=message_log_id)
+        except Exception as _e:
+            logger.error(f"[回调] ❌ 处理文本消息异常: {_e}", exc_info=True)
+            reply_content = f'抱歉，处理消息时出现错误: {_e}'
     elif msg_type == 'event':
         event = msg_data.get('Event', '')
         event_key = msg_data.get('EventKey', '')
         logger.info(f"事件详情: Event={event}, EventKey={event_key}, from={from_user}")
-        reply_content = message_handler.handle_event(event, event_key, from_user)
+        try:
+            reply_content = message_handler.handle_event(event, event_key, from_user)
+        except Exception as _e:
+            logger.error(f"[回调] ❌ 处理事件异常: {_e}", exc_info=True)
+            reply_content = ''
     elif msg_type == 'voice':
         reply_content = "抱歉，暂不支持语音输入，请发送文字消息\n格式：类别 金额 备注"
     else:

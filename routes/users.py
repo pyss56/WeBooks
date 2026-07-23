@@ -1,7 +1,7 @@
 """用户管理 API 和页面"""
 import logging
 from flask import Blueprint, request, jsonify, render_template, session
-from auth import login_required
+from auth import login_required, admin_required, menu_button_required
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('users', __name__)
@@ -35,7 +35,7 @@ def api_users_list():
 
 
 @bp.route('/api/users/create', methods=['POST'])
-@login_required
+@menu_button_required('/api/users/create')
 def api_users_create():
     data = request.get_json() or {}
     name = data.get('name', '').strip()
@@ -54,7 +54,7 @@ def api_users_create():
 
 
 @bp.route('/api/users/update', methods=['POST'])
-@login_required
+@menu_button_required('/api/users/update')
 def api_users_update():
     data = request.get_json() or {}
     user_id = data.get('id', '')
@@ -72,7 +72,7 @@ def api_users_update():
 
 
 @bp.route('/api/users/delete', methods=['POST'])
-@login_required
+@menu_button_required('/api/users/delete')
 def api_users_delete():
     data = request.get_json() or {}
     user_id = data.get('id', '')
@@ -154,6 +154,87 @@ def api_users_unbind_wx():
         return jsonify({'success': ok, 'message': '已解绑' if ok else '解绑失败'})
     except Exception as e:
         logger.error(f"解绑异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@bp.route('/api/users/set-password', methods=['POST'])
+@menu_button_required('/api/users/set-password')
+def api_users_set_password():
+    """管理员设置/重置用户密码"""
+    data = request.get_json() or {}
+    user_code = data.get('user_code', '').strip()
+    password = data.get('password', '').strip()
+    if not user_code:
+        return jsonify({'success': False, 'message': '缺少用户编码'}), 400
+    if not password or len(password) < 4:
+        return jsonify({'success': False, 'message': '密码长度至少4位'}), 400
+    try:
+        from db import set_user_password
+        ok = set_user_password(user_code, password)
+        return jsonify({'success': ok, 'message': '密码已设置' if ok else '设置失败'})
+    except Exception as e:
+        logger.error(f"设置密码异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@bp.route('/api/users/change-password', methods=['POST'])
+@login_required
+def api_users_change_password():
+    """当前登录用户自助修改密码"""
+    data = request.get_json() or {}
+    old_pwd = data.get('old_password', '')
+    new_pwd = data.get('new_password', '').strip()
+    user_code = session.get('user_code')
+
+    if not user_code:
+        return jsonify({'success': False, 'message': '未登录'}), 401
+    if not old_pwd:
+        return jsonify({'success': False, 'message': '请输入当前密码'}), 400
+    if not new_pwd or len(new_pwd) < 4:
+        return jsonify({'success': False, 'message': '新密码长度至少4位'}), 400
+
+    try:
+        from db import verify_user_password, set_user_password
+        if not verify_user_password(user_code, old_pwd):
+            return jsonify({'success': False, 'message': '当前密码错误'}), 400
+        ok = set_user_password(user_code, new_pwd)
+        return jsonify({'success': ok, 'message': '密码已修改' if ok else '修改失败'})
+    except Exception as e:
+        logger.error(f"修改密码异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@bp.route('/api/users/roles', methods=['GET'])
+@login_required
+def api_users_get_roles():
+    """获取用户当前角色编码列表"""
+    user_code = request.args.get('user_code', '').strip()
+    if not user_code:
+        return jsonify({'success': False, 'message': '缺少用户编码'}), 400
+    try:
+        from db import get_user_role_codes
+        codes = get_user_role_codes(user_code)
+        return jsonify({'success': True, 'data': codes})
+    except Exception as e:
+        logger.error(f"获取用户角色异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@bp.route('/api/users/roles', methods=['POST'])
+@menu_button_required('/api/users/roles')
+def api_users_set_roles():
+    """设置用户角色"""
+    data = request.get_json() or {}
+    user_code = data.get('user_code', '').strip()
+    role_codes = data.get('role_codes', [])
+    if not user_code:
+        return jsonify({'success': False, 'message': '缺少用户编码'}), 400
+    try:
+        from db import set_user_roles
+        ok = set_user_roles(user_code, role_codes,
+                            updated_by=session.get('username', 'admin'))
+        return jsonify({'success': ok, 'message': '角色已更新' if ok else '更新失败'})
+    except Exception as e:
+        logger.error(f"设置用户角色异常: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

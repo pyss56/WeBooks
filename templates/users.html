@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}用户管理{% endblock %}
-{% block nav_users %}active{% endblock %}
 
 {% block content %}
 <h2>👥 用户管理</h2>
@@ -45,6 +44,23 @@
         <div class="btns">
             <button class="btn btn-outline" onclick="closeBindModal()">取消</button>
             <button class="btn btn-primary" onclick="submitBind()">绑定</button>
+        </div>
+    </div>
+</div>
+
+<!-- 角色绑定弹窗 -->
+<div class="modal-overlay" id="userRoleModal">
+    <div class="modal" style="width:500px;">
+        <h3>👥 分配角色</h3>
+        <p style="font-size:13px;color:#666;margin-bottom:12px;" id="userRoleNameLabel"></p>
+        <input type="hidden" id="userRoleCodeForUser">
+        <div class="field">
+            <label>勾选用户拥有的角色</label>
+            <div id="roleCheckboxes" style="max-height:300px;overflow-y:auto;border:1px solid #d9d9d9;border-radius:6px;padding:8px 12px;"></div>
+        </div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeUserRoleModal()">取消</button>
+            <button class="btn btn-primary" onclick="saveUserRoles()">保存</button>
         </div>
     </div>
 </div>
@@ -115,8 +131,7 @@ async function loadUsers() {
                 html += '<div class="user-card">';
                 html += '  <div class="avatar' + (disabled ? ' disabled' : '') + '">' + (disabled ? '🚫' : '👤') + '</div>';
                 html += '  <div class="info">';
-                html += '    <div class="name">' + escapeHtml(u.name) + ' <span style="font-size:11px;color:#999;font-weight:400;">code: ' + escapeHtml(u.code) + '</span>';
-                html += '      ' + (disabled ? '<span class="badge-disabled">已停用</span>' : '<span class="badge-enabled">启用</span>');
+                html += '    <div class="name">' + escapeHtml(u.name) + ' <span style="font-size:11px;color:#999;font-weight:400;">code: ' + escapeHtml(u.code) + '</span>';                html +=       (u.is_admin ? ' <span style="display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;background:#e8f0fe;color:#1a73e8;font-weight:600;">管理员</span>' : '');                html += '      ' + (disabled ? '<span class="badge-disabled">已停用</span>' : '<span class="badge-enabled">启用</span>');
                 html += '    </div>';
                 if (sourceusers.length > 0) {
                     html += '    <div class="wx-list">';
@@ -138,6 +153,8 @@ async function loadUsers() {
                 html += '  </div>';
                 html += '  <div class="actions">';
                 html += `    <button class="btn btn-outline btn-sm" onclick="showBindModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="绑定平台账号">🔗</button>`;
+                html += `    <button class="btn btn-outline btn-sm" onclick="setPassword('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="设置密码">🔑</button>`;
+                html += `    <button class="btn btn-outline btn-sm" onclick="showUserRolesModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="分配角色">👥</button>`;
                 if (disabled) {
                     html += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',1)" title="启用">▶️</button>`;
                 } else {
@@ -326,6 +343,71 @@ function deleteUser(userId, userName) {
         if (r.success) { showToast('✅ 已删除', 'success'); loadUsers(); }
         else { showToast('❌ ' + r.message, 'error'); }
     }).catch(e => showToast('❌ ' + e.message, 'error'));
+}
+
+/* ── 管理员设置用户密码 ── */
+function setPassword(userCode, userName) {
+    const pwd = prompt('为「' + userName + '」设置新密码（至少4位）：', '');
+    if (!pwd || pwd.length < 4) { showToast('密码长度至少4位', 'error'); return; }
+    fetch('/api/users/set-password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_code: userCode, password: pwd}),
+    }).then(r => r.json()).then(r => {
+        if (r.success) { showToast('✅ 密码已设置', 'success'); }
+        else { showToast('❌ ' + r.message, 'error'); }
+    }).catch(e => showToast('❌ ' + e.message, 'error'));
+}
+
+/* ── 用户角色分配弹窗 ── */
+async function showUserRolesModal(userCode, userName) {
+    document.getElementById('userRoleCodeForUser').value = userCode;
+    document.getElementById('userRoleNameLabel').textContent = '用户：' + escapeHtml(userName) + '（' + escapeHtml(userCode) + '）';
+
+    try {
+        var [roleResp, userRoleResp] = await Promise.all([
+            fetch('/api/roles/list'),
+            fetch('/api/users/roles?user_code=' + encodeURIComponent(userCode))
+        ]);
+        var roleResult = await roleResp.json();
+        var userRoleResult = await userRoleResp.json();
+        var roles = roleResult.data || [];
+        var boundRoles = userRoleResult.data || [];
+
+        var html = '';
+        roles.forEach(function(r) {
+            var checked = boundRoles.indexOf(r.code) !== -1 ? 'checked' : '';
+            html += '<label style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f5f5f5;cursor:pointer;">';
+            html += '<input type="checkbox" class="user-role-chk" value="' + escapeHtml(r.code) + '" ' + checked + ' style="width:15px;height:15px;">';
+            html += '<span><strong>' + escapeHtml(r.name) + '</strong> <span style="color:#999;font-size:11px;">(' + escapeHtml(r.code) + ')</span></span>';
+            html += '</label>';
+        });
+        document.getElementById('roleCheckboxes').innerHTML = html || '<div style="color:#999;padding:10px;text-align:center;">暂无角色</div>';
+        document.getElementById('userRoleModal').classList.add('active');
+    } catch (e) {
+        showToast('❌ 加载失败: ' + e.message, 'error');
+    }
+}
+
+function closeUserRoleModal() {
+    document.getElementById('userRoleModal').classList.remove('active');
+}
+
+async function saveUserRoles() {
+    var userCode = document.getElementById('userRoleCodeForUser').value;
+    if (!userCode) { showToast('❌ 缺少用户编码', 'error'); return; }
+    var chks = document.querySelectorAll('.user-role-chk:checked');
+    var roleCodes = Array.from(chks).map(function(c) { return c.value; });
+    try {
+        var resp = await fetch('/api/users/roles', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_code: userCode, role_codes: roleCodes})
+        });
+        var result = await resp.json();
+        if (result.success) { showToast('✅ 角色已分配', 'success'); closeUserRoleModal(); }
+        else { showToast('❌ ' + result.message, 'error'); }
+    } catch (e) { showToast('❌ ' + e.message, 'error'); }
 }
 
 loadUsers();

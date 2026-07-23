@@ -12,7 +12,7 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 DB_PATH = os.path.join(DB_DIR, 'data.db')
 
 # ============ 数据库版本管理 ============
-DB_VERSION = 3
+DB_VERSION = 4
 
 
 def _get_schema_version(conn) -> int:
@@ -249,6 +249,8 @@ def _create_all_tables(conn):
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             name            TEXT NOT NULL,
             code            TEXT NOT NULL UNIQUE,
+            password_hash   TEXT DEFAULT NULL,
+            is_admin        INTEGER NOT NULL DEFAULT 0,
             status          INTEGER NOT NULL DEFAULT 1,
             deleted_at      TEXT DEFAULT NULL,
             created_by      TEXT DEFAULT NULL,
@@ -293,6 +295,68 @@ def _create_all_tables(conn):
             created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             updated_by  TEXT DEFAULT NULL,
             updated_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS menu (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_id   INTEGER NOT NULL DEFAULT 0,
+            type        TEXT NOT NULL DEFAULT 'page',
+            label       TEXT NOT NULL,
+            icon        TEXT NOT NULL DEFAULT '📄',
+            url         TEXT DEFAULT NULL,
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            is_active   INTEGER NOT NULL DEFAULT 1,
+            default_expanded INTEGER NOT NULL DEFAULT 1,
+            created_by  TEXT DEFAULT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            updated_by  TEXT DEFAULT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS role (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            code        TEXT NOT NULL UNIQUE,
+            name        TEXT NOT NULL,
+            description TEXT DEFAULT NULL,
+            is_default  INTEGER NOT NULL DEFAULT 0,
+            created_by  TEXT DEFAULT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            updated_by  TEXT DEFAULT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS role_menu (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            role_code   TEXT NOT NULL,
+            menu_id     INTEGER NOT NULL,
+            created_by  TEXT DEFAULT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(role_code, menu_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_role (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_code   TEXT NOT NULL,
+            role_code   TEXT NOT NULL,
+            created_by  TEXT DEFAULT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(user_code, role_code)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS role_button (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            role_code   TEXT NOT NULL,
+            menu_id     INTEGER NOT NULL,
+            button_code TEXT NOT NULL,
+            created_by  TEXT DEFAULT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(role_code, menu_id, button_code)
         )
     """)
 
@@ -383,9 +447,92 @@ def init_db():
     try:
         current = _get_schema_version(conn)
 
+        # 始终确保所有表结构存在（CREATE TABLE IF NOT EXISTS 幂等安全）
+        _create_all_tables(conn)
+
         if current < DB_VERSION:
-            # 创建所有表（最终形态，包含所有列）
-            _create_all_tables(conn)
+            # v4: 统一用户密码/管理员/菜单/角色系统
+            logger.info("数据库迁移 v4: 统一用户/菜单/角色系统")
+            for col, ddl in [
+                ("password_hash", "ALTER TABLE \"user\" ADD COLUMN password_hash TEXT DEFAULT NULL"),
+                ("is_admin", "ALTER TABLE \"user\" ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"),
+                ("default_expanded", "ALTER TABLE menu ADD COLUMN default_expanded INTEGER NOT NULL DEFAULT 1"),
+                ("visible_to", "ALTER TABLE sidebar_menu ADD COLUMN visible_to TEXT DEFAULT 'all'"),
+            ]:
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError:
+                    pass
+            # 清理过渡表（幂等）
+            try:
+                conn.execute("DROP TABLE IF EXISTS menu_button")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("DROP TABLE IF EXISTS role_menu_button")
+            except sqlite3.OperationalError:
+                pass
+            # 从 sidebar_menu 迁移数据到 menu（如果 menu 为空）
+            try:
+                sm_count = conn.execute("SELECT COUNT(*) FROM sidebar_menu").fetchone()[0]
+                m_count = conn.execute("SELECT COUNT(*) FROM menu").fetchone()[0]
+                if sm_count > 0 and m_count == 0:
+                    rows = conn.execute("SELECT * FROM sidebar_menu").fetchall()
+                    for r in rows:
+                        conn.execute(
+                            "INSERT INTO menu (id, parent_id, type, label, icon, url, sort_order, is_active, default_expanded, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                            (r['id'], r.get('parent_id', 0), r.get('type', 'page'), r['label'], r['icon'],
+                             r.get('url'), r['sort_order'], r['is_active'],
+                             r['created_by'], r['created_at'], r['updated_by'], r['updated_at']))
+                    logger.info(f"从 sidebar_menu 迁移 {sm_count} 条数据到 menu 表")
+            except Exception as e:
+                logger.warning(f"迁移 sidebar_menu→menu 失败: {e}")
+            # 清理 sidebar_menu（如果 menu 已有数据则删除旧表）
+            try:
+                cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
+                if cur.fetchone()['cnt'] > 0:
+                    conn.execute("DROP TABLE IF EXISTS sidebar_menu")
+            except sqlite3.OperationalError:
+                pass
+            # 移除 visible_to 列（如果存在）
+            try:
+                conn.execute("ALTER TABLE sidebar_menu DROP COLUMN visible_to")
+            except sqlite3.OperationalError:
+                pass
+            # v4 续: 菜单数据更新
+            logger.info("数据库迁移 v4: 菜单数据更新")
+            # 默认折叠
+            conn.execute("UPDATE menu SET default_expanded=0 WHERE label IN ('系统管理','记账管理','记账设置') AND type='dir'")
+            # 更新账户设置图标
+            conn.execute("UPDATE menu SET icon='💳' WHERE label='账户设置' AND icon='👤'")
+            # 提取记账管理中的科目管理/预算管理/账户设置到独立记账设置目录
+            jz = conn.execute("SELECT id FROM menu WHERE label='记账管理' AND type='dir'").fetchone()
+            if jz:
+                jz_id = jz[0]
+                # 排序记账管理下的页面：页面记账、交易查询、对账管理
+                for order, lab in [(1,'页面记账'),(2,'交易查询'),(3,'对账管理')]:
+                    conn.execute("UPDATE menu SET sort_order=? WHERE label=? AND parent_id=?", (order, lab, jz_id))
+            # 创建记账设置（一级目录）
+            cur = conn.execute("SELECT id FROM menu WHERE label='记账设置' AND type='dir'")
+            if not cur.fetchone():
+                # 将科目管理、预算管理、账户设置设为一级，放到记账设置下面
+                for lab in ('科目管理','预算管理','账户设置'):
+                    conn.execute("UPDATE menu SET parent_id=0, sort_order=99 WHERE label=?", (lab,))
+                conn.execute(
+                    "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (0, 'dir', '记账设置', '⚙️', NULL, 3, 0, 'system')")
+                jz_set_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                for idx, lab in enumerate([('科目管理','📂'),('预算管理','📊'),('账户设置','💳')], 1):
+                    conn.execute(
+                        "UPDATE menu SET parent_id=?, sort_order=? WHERE label=?", (jz_set_id, idx, lab[0]))
+                # 调整记账管理排序
+                conn.execute("UPDATE menu SET sort_order=4 WHERE label='记账管理' AND type='dir'")
+            # 系统管理子项排序
+            sys_mgr = conn.execute("SELECT id FROM menu WHERE label='系统管理' AND type='dir'").fetchone()
+            if sys_mgr:
+                sid = sys_mgr[0]
+                for order, lab in [(1,'用户管理'),(2,'角色管理'),(3,'菜单管理'),(4,'计划任务'),(5,'消息日志')]:
+                    conn.execute("UPDATE menu SET sort_order=? WHERE label=? AND parent_id=?", (order, lab, sid))
+            conn.commit()
 
             # 初始化账户科目数据
             cursor = conn.execute("SELECT COUNT(*) as cnt FROM account_category")
@@ -408,6 +555,10 @@ def init_db():
             logger.info(f"数据库初始化完成: {DB_PATH}, 版本: {DB_VERSION}")
         else:
             logger.info(f"数据库版本已是最新: {DB_PATH}, 版本: {DB_VERSION}")
+
+        # 确保默认角色存在（无论是否迁移）
+        init_default_roles()
+
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
         raise
@@ -948,10 +1099,9 @@ def add_transaction(bill_type: str, category_name: str, amount: float,
         transaction_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     amount_cents = int(round(amount * 100))
     import uuid
-    import random
     tx_uuid = str(uuid.uuid4())
     if not verify_code:
-        verify_code = f"{random.randint(0, 9999):04d}"
+        verify_code = generate_verify_code()
     conn = get_connection()
     try:
         cursor = conn.execute("""
@@ -1349,6 +1499,37 @@ def get_reconciliations(limit: int = 100, offset: int = 0,
     except Exception as e:
         logger.error(f"查询对账失败: {e}")
         return []
+    finally:
+        conn.close()
+
+
+def count_reconciliations(status: str = None,
+                          reconciliation_no: str = None,
+                          date_from: str = None,
+                          date_to: str = None) -> int:
+    """统计对账记录总数"""
+    conn = get_connection()
+    try:
+        sql = "SELECT COUNT(*) AS cnt FROM reconciliation WHERE 1=1"
+        params = []
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if reconciliation_no:
+            sql += " AND reconciliation_no LIKE ?"
+            params.append(f'%{reconciliation_no}%')
+        if date_from:
+            sql += " AND created_at >= ?"
+            params.append(date_from)
+        if date_to:
+            sql += " AND created_at <= ?"
+            params.append(date_to + ' 23:59:59')
+        cursor = conn.execute(sql, params)
+        row = cursor.fetchone()
+        return row['cnt'] if row else 0
+    except Exception as e:
+        logger.error(f"统计对账失败: {e}")
+        return 0
     finally:
         conn.close()
 
@@ -1807,14 +1988,16 @@ def delete_account(account_id):
 
 # ============ 用户管理 ============
 
-def add_user(name, code=None, created_by=None):
+def add_user(name, code=None, created_by=None, is_admin=0):
     """添加用户"""
     conn = get_connection()
     try:
         if code:
-            conn.execute("INSERT OR IGNORE INTO \"user\" (name, code, created_by) VALUES (?, ?, ?)", (name, code, created_by))
+            conn.execute("INSERT OR IGNORE INTO \"user\" (name, code, created_by, is_admin) VALUES (?, ?, ?, ?)",
+                         (name, code, created_by, is_admin))
         else:
-            conn.execute("INSERT OR IGNORE INTO \"user\" (name, code, created_by) VALUES (?, ?, ?)", (name, name, created_by))
+            conn.execute("INSERT OR IGNORE INTO \"user\" (name, code, created_by, is_admin) VALUES (?, ?, ?, ?)",
+                         (name, name, created_by, is_admin))
         conn.commit()
         cur = conn.execute("SELECT * FROM \"user\" WHERE name=?", (name,))
         r = cur.fetchone()
@@ -2054,7 +2237,7 @@ def delete_user_sourceuser(source_user, source):
         conn.close()
 
 
-def update_user(user_id, name=None, status=None, updated_by=None):
+def update_user(user_id, name=None, status=None, is_admin=None, updated_by=None):
     """更新用户信息（status=0 停用, status=1 启用）"""
     conn = get_connection()
     try:
@@ -2066,6 +2249,9 @@ def update_user(user_id, name=None, status=None, updated_by=None):
         if status is not None:
             fields.append("status=?")
             params.append(status)
+        if is_admin is not None:
+            fields.append("is_admin=?")
+            params.append(1 if is_admin else 0)
         if not fields:
             return True
         fields.append("updated_at=datetime('now','localtime')")
@@ -2118,6 +2304,594 @@ def delete_user(user_id, updated_by=None):
     except Exception as e:
         logger.error(f"删除用户失败: {e}")
         return {'success': False, 'message': str(e)}
+    finally:
+        conn.close()
+
+
+# ============ 验证码公用方法 ============
+
+
+def generate_verify_code() -> str:
+    """生成 4 位数字验证码"""
+    import random as _r
+    return f"{_r.randint(0, 9999):04d}"
+
+
+# ============ 用户密码管理 ============
+
+
+def set_user_password(user_code: str, password: str) -> bool:
+    """设置或更新用户密码"""
+    import hashlib
+    password_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE \"user\" SET password_hash=?, updated_at=datetime('now','localtime') WHERE code=? AND deleted_at IS NULL",
+            (password_hash, user_code))
+        conn.commit()
+        return conn.total_changes > 0
+    except Exception as e:
+        logger.error(f"设置用户密码失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def verify_user_password(user_code: str, password: str) -> bool:
+    """校验用户密码"""
+    import hashlib
+    password_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "SELECT password_hash FROM \"user\" WHERE code=? AND deleted_at IS NULL AND status=1",
+            (user_code,))
+        r = cur.fetchone()
+        if r and r['password_hash']:
+            return r['password_hash'] == password_hash
+        return False
+    except Exception as e:
+        logger.error(f"校验用户密码失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_user_by_login(login_name: str) -> dict:
+    """根据登录名（name 或 code）查找启用用户"""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM \"user\" WHERE (name=? OR code=?) AND deleted_at IS NULL AND status=1 LIMIT 1",
+            (login_name, login_name))
+        r = cur.fetchone()
+        return dict(r) if r else None
+    except Exception as e:
+        logger.error(f"查找用户失败: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def sync_admin_user(config) -> bool:
+    """从环境变量同步管理员账号到数据库
+    当 ADMIN_USERNAME 和 ADMIN_PASSWORD 配置时，自动在数据库中创建/更新管理员用户。
+    """
+    import hashlib
+    admin_name = config.ADMIN_USERNAME
+    admin_pwd = config.ADMIN_PASSWORD
+    if not admin_name or not admin_pwd:
+        logger.warning("ADMIN_USERNAME 或 ADMIN_PASSWORD 未配置，跳过管理员同步")
+        return False
+    conn = get_connection()
+    try:
+        # 检查是否已存在该用户
+        cur = conn.execute(
+            "SELECT id, password_hash, is_admin FROM \"user\" WHERE (name=? OR code=?) AND deleted_at IS NULL LIMIT 1",
+            (admin_name, admin_name))
+        existing = cur.fetchone()
+        password_hash = hashlib.sha256(admin_pwd.encode('utf-8')).hexdigest()
+        if existing:
+            # 已有账号，只确保 is_admin 标识，不覆盖密码
+            conn.execute(
+                "UPDATE \"user\" SET is_admin=1, updated_at=datetime('now','localtime') WHERE id=?",
+                (existing['id'],))
+            logger.info(f"管理员用户 '{admin_name}' 已存在，更新管理员标识（保留原有密码）")
+        else:
+            conn.execute(
+                "INSERT INTO \"user\" (name, code, password_hash, is_admin, created_by) VALUES (?, ?, ?, 1, 'system')",
+                (admin_name, admin_name, password_hash))
+            logger.info(f"管理员用户 '{admin_name}' 已自动创建")
+        # 赋予 admin 角色
+        conn.execute(
+            "INSERT OR IGNORE INTO user_role (user_code, role_code, created_by) VALUES (?, 'admin', 'system')",
+            (admin_name,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"同步管理员用户失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ============ 侧边栏菜单管理 ============
+
+DEFAULT_MENUS = [
+    # (type, parent_1based_index, icon, label, url, sort_order)
+    # 首页（一级）
+    ('page', 0, '🏠', '首页', '/', 1),
+    # 系统管理 (dir) - 默认折叠
+    ('dir', 0, '⚙️', '系统管理', None, 2),
+    ('page', 2, '👥', '用户管理', '/user', 1),
+    ('page', 2, '👥', '角色管理', '/roles', 2),
+    ('page', 2, '📐', '菜单管理', '/menu', 3),
+    ('page', 2, '⏰', '计划任务', '/scheduled-tasks', 4),
+    ('page', 2, '📋', '消息日志', '/message-log', 5),
+    # 系统管理 - 按键权限（用户管理）
+    ('btn', 3, '➕', '用户-新建', '/api/users/create', 99),
+    ('btn', 3, '🔗', '用户-绑定微信', '/api/users/bind-wx', 99),
+    ('btn', 3, '👥', '用户-分配角色', '/api/users/roles', 99),
+    ('btn', 3, '🔑', '用户-设置密码', '/api/users/set-password', 99),
+    ('btn', 3, '🔄', '用户-启用停用', '/api/users/update', 99),
+    ('btn', 3, '🗑️', '用户-删除', '/api/users/delete', 99),
+    # 系统管理 - 按键权限（角色管理）
+    ('btn', 4, '➕', '角色-新建', '/api/roles/create', 99),
+    ('btn', 4, '✏️', '角色-编辑', '/api/roles/update', 99),
+    ('btn', 4, '🗑️', '角色-删除', '/api/roles/delete', 99),
+    ('btn', 4, '🔐', '角色-菜单授权', '/api/roles/set-menu-bindings', 99),
+    ('btn', 4, '👤', '角色-绑定用户', '/api/roles/set-users', 99),
+    # 系统管理 - 按键权限（菜单管理）
+    ('btn', 5, '➕', '菜单-新建', '/api/menus/create', 99),
+    ('btn', 5, '✏️', '菜单-编辑', '/api/menus/update', 99),
+    ('btn', 5, '🗑️', '菜单-删除', '/api/menus/delete', 99),
+    # 记账设置 (dir) - 默认折叠
+    ('dir', 0, '⚙️', '记账设置', None, 3),
+    ('page', 22, '📂', '科目管理', '/categories', 1),
+    ('page', 22, '📊', '预算管理', '/budgets', 2),
+    ('page', 22, '💳', '账户设置', '/accounts', 3),
+    # 记账管理 (dir) - 默认折叠
+    ('dir', 0, '📒', '记账管理', None, 4),
+    ('page', 26, '✏️', '页面记账', '/add-transaction', 1),
+    ('page', 26, '💰', '交易查询', '/transaction', 2),
+    ('page', 26, '✅', '对账管理', '/reconciliation', 3),
+    # 按键权限（科目管理）
+    ('btn', 23, '➕', '科目-新建', '/api/categories/add', 99),
+    ('btn', 23, '✏️', '科目-修改', '/api/categories/modify', 99),
+    ('btn', 23, '🗑️', '科目-删除', '/api/categories/delete', 99),
+    # 按键权限（账户管理）
+    ('btn', 25, '➕', '账户-新建', '/api/accounts/create', 99),
+    ('btn', 25, '✏️', '账户-修改', '/api/accounts/modify', 99),
+    ('btn', 25, '🗑️', '账户-删除', '/api/accounts/delete', 99),
+]
+
+
+def init_menus():
+    """初始化默认菜单（仅当表为空时写入）并绑定到 admin 角色"""
+    conn = get_connection()
+    try:
+        # 确保 menu 表中有数据——如果 sidebar_menu 还存在则迁移
+        has_sidebar = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sidebar_menu'").fetchone()
+        if has_sidebar:
+            sm_count = conn.execute("SELECT COUNT(*) FROM sidebar_menu").fetchone()[0]
+            m_count = conn.execute("SELECT COUNT(*) FROM menu").fetchone()[0]
+            if sm_count > 0 and m_count == 0:
+                rows = conn.execute("SELECT * FROM sidebar_menu").fetchall()
+                for r in rows:
+                    conn.execute(
+                        "INSERT INTO menu (id, parent_id, type, label, icon, url, sort_order, is_active, created_by, created_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (r['id'], r.get('parent_id', 0), r.get('type', 'page'), r['label'], r['icon'],
+                         r.get('url'), r['sort_order'], r['is_active'],
+                         r['created_by'], r['created_at'], r['updated_by'], r['updated_at']))
+                conn.commit()
+                logger.info(f"从 sidebar_menu 迁移 {sm_count} 条数据到 menu 表")
+                return
+
+        cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
+        if cur.fetchone()['cnt'] > 0:
+            return
+        menu_ids = []
+        for idx, (typ, parent_ref, icon, label, url, sort_order) in enumerate(DEFAULT_MENUS):
+            pid = 0
+            if isinstance(parent_ref, int) and parent_ref > 0:
+                # parent_ref 是 1-based 索引，指向 menu_ids 中的位置
+                pid = menu_ids[parent_ref - 1] if parent_ref <= len(menu_ids) else 0
+            elif isinstance(parent_ref, str) and parent_ref:
+                pid = (menu_ids[idx] if idx > 0 else 0)  # fallback, won't happen
+            conn.execute(
+                "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'system')",
+                (pid, typ, label, icon, url, sort_order,
+                 0 if label in ('系统管理','记账管理','记账设置') else (1 if typ == 'dir' else 0)))
+            mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            menu_ids.append(mid)
+        conn.commit()
+        for mid in menu_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO role_menu (role_code, menu_id, created_by) VALUES ('admin', ?, 'system')",
+                (mid,))
+        user_page_labels = ['首页', '交易查询', '页面记账']
+        for row in conn.execute("SELECT id, label FROM menu WHERE type='page'").fetchall():
+            if row['label'] in user_page_labels:
+                conn.execute(
+                    "INSERT OR IGNORE INTO role_menu (role_code, menu_id, created_by) VALUES ('user', ?, 'system')",
+                    (row['id'],))
+                p = conn.execute("SELECT parent_id FROM menu WHERE id=?", (row['id'],)).fetchone()
+                if p and p['parent_id']:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO role_menu (role_code, menu_id, created_by) VALUES ('user', ?, 'system')",
+                        (p['parent_id'],))
+        conn.commit()
+        logger.info(f"已初始化 {len(DEFAULT_MENUS)} 个默认菜单")
+    except Exception as e:
+        logger.error(f"初始化菜单失败: {e}")
+    finally:
+        conn.close()
+
+
+def get_menus_for_user(role_codes: list = None) -> list:
+    """获取用户有权限看到的菜单（含父子结构）"""
+    conn = get_connection()
+    try:
+        if not role_codes:
+            return []
+        placeholders = ','.join(['?'] * len(role_codes))
+        rows = [dict(r) for r in conn.execute(
+            f"""SELECT DISTINCT m.* FROM menu m
+                LEFT JOIN role_menu rm ON rm.menu_id = m.id
+                WHERE m.is_active = 1
+                  AND rm.role_code IN ({placeholders})
+                ORDER BY m.sort_order, m.id""",
+            role_codes).fetchall()]
+        all_ids = set(r['id'] for r in rows)
+        parent_ids = set(r['parent_id'] for r in rows if r['parent_id'])
+        missing_parents = parent_ids - all_ids
+        if missing_parents:
+            extras = [dict(r) for r in conn.execute(
+                f"SELECT * FROM menu WHERE id IN ({','.join('?' * len(missing_parents))})",
+                list(missing_parents)).fetchall()]
+            rows.extend(extras)
+        rows.sort(key=lambda x: (x['sort_order'], x['id']))
+        return rows
+    except Exception as e:
+        logger.error(f"获取用户菜单失败: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_all_menus() -> list:
+    """获取所有菜单（含停用的，用于管理页面）"""
+    conn = get_connection()
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM menu ORDER BY sort_order, id").fetchall()]
+    except Exception as e:
+        logger.error(f"获取所有菜单失败: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def add_menu(label: str, icon: str, url: str = None, sort_order: int = 0,
+             parent_id: int = 0, typ: str = 'page',
+             default_expanded: int = 1,
+             created_by: str = None) -> bool:
+    """添加菜单项"""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (parent_id, typ, label, icon, url, sort_order, default_expanded, created_by))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"添加菜单失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def update_menu(menu_id: int, label: str = None, icon: str = None,
+                url: str = None, sort_order: int = None,
+                parent_id: int = None, typ: str = None,
+                is_active: int = None,
+                default_expanded: int = None,
+                updated_by: str = None) -> bool:
+    """更新菜单项"""
+    conn = get_connection()
+    try:
+        fields = ["updated_at=datetime('now','localtime')"]
+        params = []
+        if label is not None:
+            fields.append("label=?")
+            params.append(label)
+        if icon is not None:
+            fields.append("icon=?")
+            params.append(icon)
+        if url is not None:
+            fields.append("url=?")
+            params.append(url)
+        if sort_order is not None:
+            fields.append("sort_order=?")
+            params.append(sort_order)
+        if parent_id is not None:
+            fields.append("parent_id=?")
+            params.append(parent_id)
+        if typ is not None:
+            fields.append("type=?")
+            params.append(typ)
+        if is_active is not None:
+            fields.append("is_active=?")
+            params.append(is_active)
+        if default_expanded is not None:
+            fields.append("default_expanded=?")
+            params.append(1 if default_expanded else 0)
+        if updated_by:
+            fields.append("updated_by=?")
+            params.append(updated_by)
+        if not fields:
+            return True
+        params.append(menu_id)
+        conn.execute(f"UPDATE menu SET {', '.join(fields)} WHERE id=?", params)
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"更新菜单失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def delete_menu(menu_id: int) -> bool:
+    """删除菜单项"""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM menu WHERE id=?", (menu_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"删除菜单失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ============ 角色管理 ============
+
+DEFAULT_ROLES = [
+    ('admin', '管理员', '拥有所有管理权限', 1),
+    ('user', '普通用户', '可使用记账、查询等基础功能', 1),
+]
+
+
+def init_default_roles():
+    """初始化默认角色（仅当表为空时写入）"""
+    conn = get_connection()
+    try:
+        cur = conn.execute("SELECT COUNT(*) as cnt FROM role")
+        if cur.fetchone()['cnt'] > 0:
+            return
+        for code, name, desc, is_default in DEFAULT_ROLES:
+            conn.execute(
+                "INSERT INTO role (code, name, description, is_default, created_by) VALUES (?, ?, ?, ?, 'system')",
+                (code, name, desc, is_default))
+        conn.commit()
+        logger.info(f"已初始化 {len(DEFAULT_ROLES)} 个默认角色")
+    except Exception as e:
+        logger.error(f"初始化角色失败: {e}")
+    finally:
+        conn.close()
+
+
+def get_all_roles() -> list:
+    """获取所有角色"""
+    conn = get_connection()
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM role ORDER BY id").fetchall()]
+    except Exception as e:
+        logger.error(f"获取角色失败: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_user_role_codes(user_code: str) -> list:
+    """获取用户拥有的所有角色编码"""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT role_code FROM user_role WHERE user_code=?", (user_code,)).fetchall()
+        return [r['role_code'] for r in rows]
+    except Exception as e:
+        logger.error(f"获取用户角色失败: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def add_role(code: str, name: str, description: str = None,
+             is_default: int = 0, created_by: str = None) -> bool:
+    """添加角色"""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO role (code, name, description, is_default, created_by) VALUES (?, ?, ?, ?, ?)",
+            (code, name, description, is_default, created_by))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"添加角色失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def update_role(role_id: int, name: str = None, description: str = None,
+                is_default: int = None, updated_by: str = None) -> bool:
+    """更新角色"""
+    conn = get_connection()
+    try:
+        fields = ["updated_at=datetime('now','localtime')"]
+        params = []
+        if name is not None:
+            fields.append("name=?")
+            params.append(name)
+        if description is not None:
+            fields.append("description=?")
+            params.append(description)
+        if is_default is not None:
+            fields.append("is_default=?")
+            params.append(is_default)
+        if updated_by:
+            fields.append("updated_by=?")
+            params.append(updated_by)
+        if not fields:
+            return True
+        params.append(role_id)
+        conn.execute(f"UPDATE role SET {', '.join(fields)} WHERE id=?", params)
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"更新角色失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def delete_role(role_id: int) -> bool:
+    """删除角色（同时清理关联的 role_menu 和 user_role）"""
+    conn = get_connection()
+    try:
+        cur = conn.execute("SELECT code FROM role WHERE id=?", (role_id,))
+        r = cur.fetchone()
+        if not r:
+            return False
+        code = r['code']
+        conn.execute("DELETE FROM role_menu WHERE role_code=?", (code,))
+        conn.execute("DELETE FROM user_role WHERE role_code=?", (code,))
+        conn.execute("DELETE FROM role WHERE id=?", (role_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"删除角色失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ============ 角色-菜单绑定 ============
+
+def set_role_menus(role_code: str, menu_ids: list, updated_by: str = None) -> bool:
+    """批量设置角色可见的菜单"""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM role_menu WHERE role_code=?", (role_code,))
+        for mid in menu_ids:
+            conn.execute(
+                "INSERT INTO role_menu (role_code, menu_id, created_by) VALUES (?, ?, ?)",
+                (role_code, mid, updated_by))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"设置角色菜单失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_role_menu_ids(role_code: str) -> list:
+    """获取角色可见的菜单 ID 列表"""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT menu_id FROM role_menu WHERE role_code=?", (role_code,)).fetchall()
+        return [r['menu_id'] for r in rows]
+    except Exception as e:
+        logger.error(f"获取角色菜单失败: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def check_user_menu_permission(user_code: str, menu_url: str) -> bool:
+    """检查用户是否有某个菜单/按钮的权限（通过角色）"""
+    if not user_code or not menu_url:
+        return False
+    conn = get_connection()
+    try:
+        # 获取用户角色
+        role_codes = [r['role_code'] for r in conn.execute(
+            "SELECT role_code FROM user_role WHERE user_code=?", (user_code,)).fetchall()]
+        if not role_codes:
+            return False
+        # 查找菜单 ID
+        menu = conn.execute(
+            "SELECT id FROM menu WHERE url=? AND is_active=1 LIMIT 1", (menu_url,)).fetchone()
+        if not menu:
+            return False
+        menu_id = menu['id']
+        # 检查角色是否有权限
+        placeholders = ','.join(['?'] * len(role_codes))
+        result = conn.execute(
+            f"SELECT 1 FROM role_menu WHERE menu_id=? AND role_code IN ({placeholders}) LIMIT 1",
+            [menu_id] + role_codes).fetchone()
+        return result is not None
+    except Exception as e:
+        logger.error(f"检查菜单权限失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ============ 用户-角色绑定 ============
+
+def set_user_roles(user_code: str, role_codes: list, updated_by: str = None) -> bool:
+    """批量设置用户拥有的角色"""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM user_role WHERE user_code=?", (user_code,))
+        for rc in role_codes:
+            conn.execute(
+                "INSERT INTO user_role (user_code, role_code, created_by) VALUES (?, ?, ?)",
+                (user_code, rc, updated_by))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"设置用户角色失败: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_users_with_roles(status=None) -> list:
+    """获取用户列表（含角色信息）"""
+    conn = get_connection()
+    try:
+        sql = "SELECT * FROM \"user\" WHERE deleted_at IS NULL"
+        params = []
+        if status is not None:
+            sql += " AND status=?"
+            params.append(status)
+        sql += " ORDER BY name"
+        users = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        # 获取所有角色
+        role_rows = conn.execute(
+            "SELECT ur.user_code, r.code, r.name FROM user_role ur JOIN role r ON r.code=ur.role_code"
+        ).fetchall()
+        role_map = {}
+        for rr in role_rows:
+            role_map.setdefault(rr['user_code'], []).append({
+                'code': rr['code'], 'name': rr['name']})
+        for u in users:
+            code = u['code']
+            u['roles'] = role_map.get(code, [])
+        return users
+    except Exception as e:
+        logger.error(f"获取用户列表失败: {e}")
+        return []
     finally:
         conn.close()
 

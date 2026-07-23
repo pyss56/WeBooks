@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}交易查询{% endblock %}
-{% block nav_bills %}active{% endblock %}
 
 {% block content %}
 {% if error %}
@@ -13,7 +12,7 @@
 
 <!-- 查询区域 -->
 <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
-  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+  <div class="filter-grid" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
     <div>
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
       <select id="queryType" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
@@ -54,17 +53,15 @@
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">对账号</label>
       <input type="text" id="queryReconNo" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:160px;">
     </div>
-    <div>
+    <div class="filter-actions">
       <button class="btn btn-primary" onclick="loadBills(1)">🔍 查询</button>
-    </div>
-    <div>
       <button class="btn btn-outline" onclick="resetQuery()">🔄 重置</button>
     </div>
   </div>
 </div>
 
 <!-- 汇总信息 -->
-<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+<div class="summary-cards" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
   <div style="background:#fff;border-radius:8px;padding:14px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.06);flex:1;min-width:140px;text-align:center;">
     <div style="font-size:12px;color:#888;">总收入</div>
     <div style="font-size:22px;font-weight:700;color:#2e7d32;" id="totalIncome">¥0.00</div>
@@ -85,7 +82,8 @@
 
 <!-- 列表区域 -->
 <div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
-  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+  <div class="table-wrap">
+  <table id="billsTable" style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead>
       <tr style="background:#fafafa;border-bottom:1px solid #eee;">
         <th style="padding:12px 14px;text-align:left;color:#555;">ID</th>
@@ -105,6 +103,9 @@
       <tr><td colspan="11" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
     </tbody>
   </table>
+  </div>
+  <!-- 手机端卡片列表 -->
+  <div id="billsCards" class="bills-cards"></div>
 </div>
 
 <!-- 编辑弹窗 -->
@@ -135,9 +136,18 @@
       <label>备注</label>
       <input type="text" id="editComment" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
     </div>
-    <div class="field">
+    <div class="field" id="editUserField">
       <label>记账人</label>
-      <input type="text" id="editSourceUser" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+      {% if session_is_admin %}
+      <select id="editSourceUser" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;">
+        <option value="">加载中...</option>
+      </select>
+      {% else %}
+      <div style="padding:8px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;font-size:13px;color:#555;">
+        👤 {{ session_username }}
+      </div>
+      <input type="hidden" id="editSourceUser" value="">
+      {% endif %}
     </div>
     <div class="field">
       <label>记账时间</label>
@@ -152,8 +162,8 @@
 </div>
 
 <!-- 分页 -->
-<div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap;">
-  <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;">
+<div class="pagination-wrap" style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap;">
+  <div class="page-size" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;">
     <label>每页</label>
     <select id="pageSizeSelect" style="padding:6px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" onchange="loadBills(1)">
       <option value="20">20</option>
@@ -162,12 +172,12 @@
     </select>
     <label>条</label>
   </div>
-  <button class="btn btn-outline btn-sm" id="firstPage" onclick="loadBills(1)" disabled>首页</button>
+  <button class="btn btn-outline btn-sm pc-only" id="firstPage" onclick="loadBills(1)" disabled>首页</button>
   <button class="btn btn-outline btn-sm" id="prevPage" onclick="loadBills(currentPage - 1)" disabled>上一页</button>
   <span style="font-size:13px;color:#555;" id="pageInfo">第 1 页</span>
   <button class="btn btn-outline btn-sm" id="nextPage" onclick="loadBills(currentPage + 1)">下一页</button>
-  <button class="btn btn-outline btn-sm" id="lastPage" onclick="goLastPage()">末页</button>
-  <div style="display:flex;align-items:center;gap:4px;font-size:13px;color:#555;">
+  <button class="btn btn-outline btn-sm pc-only" id="lastPage" onclick="goLastPage()">末页</button>
+  <div class="pc-only" style="display:flex;align-items:center;gap:4px;font-size:13px;color:#555;">
     <label>跳至</label>
     <input type="number" id="jumpPage" min="1" style="width:56px;padding:6px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;text-align:center;" onkeydown="if(event.key==='Enter')jumpToPage()">
     <button class="btn btn-primary btn-sm" onclick="jumpToPage()">GO</button>
@@ -201,10 +211,110 @@
   .modal .field { margin-bottom:14px; }
   .modal .field label { display:block;font-size:12px;color:#888;margin-bottom:4px; }
   .modal .btns { display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid #eee; }
+
+  /* ── 手机端适配 ── */
+  @media (max-width: 768px) {
+    /* 过滤器：两列网格 */
+    .filter-grid {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 10px !important;
+    }
+    .filter-grid > div { min-width: 0 !important; }
+    .filter-grid .filter-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    .filter-grid select,
+    .filter-grid input {
+      width: 100% !important;
+      min-width: 0 !important;
+      font-size: 14px !important; /* 防 iOS 缩放 */
+    }
+    /* 汇总卡片：两列 */
+    .summary-cards {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 10px !important;
+    }
+    .summary-cards > div {
+      min-width: 0 !important;
+      padding: 12px 10px !important;
+    }
+    .summary-cards > div > div:last-child {
+      font-size: 18px !important;
+    }
+    /* 页面边距 */
+    .main-content { padding: 16px !important; }
+    .main-content h2 { font-size: 18px !important; }
+    /* 分页：更紧凑 */
+    .pagination-wrap { gap: 6px !important; }
+    .pagination-wrap .page-size { order: 10; width: 100%; justify-content: center; margin-top: 4px; }
+    .pagination-wrap button { font-size: 12px !important; padding: 4px 10px !important; }
+    /* 编辑弹窗适配 */
+    .modal { padding: 20px !important; }
+    .modal .btns { flex-wrap: wrap; }
+    .modal .btns .btn-danger { width: 100%; margin-bottom: 4px; }
+  }
+  /* ── 手机端卡片样式 ── */
+  .bills-cards { display: none; }
+  .bill-card-empty {
+    text-align: center; padding: 40px; color: #999; font-size: 14px;
+  }
+  .bill-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+  }
+  .bill-card:active { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .card-row { margin-bottom: 6px; }
+  .card-row:last-child { margin-bottom: 0; }
+  .card-top {
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card-amount { font-size: 18px; font-weight: 700; }
+  .card-mid {
+    display: flex; gap: 16px; font-size: 13px; color: #555;
+  }
+  .card-label {
+    display: inline-block; color: #999; margin-right: 4px; font-size: 12px;
+  }
+  .card-comment {
+    font-size: 13px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card-bottom {
+    display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #999; align-items: center;
+  }
+  .card-recon-no {
+    font-size: 11px; color: #aaa; margin-left: auto;
+  }
+
+  @media (max-width: 768px) {
+    .table-wrap { display: none; }
+    .bills-cards { display: block; }
+    .pc-only { display: none !important; }
+  }
+
+  @media (max-width: 480px) {
+    /* 过滤器：单列 */
+    .filter-grid { grid-template-columns: 1fr !important; }
+    .main-content { padding: 12px !important; }
+    .summary-cards > div > div:last-child { font-size: 16px !important; }
+  }
 </style>
 {% endblock %}
 
 {% block extra_script %}
+/* ── 可复用：用户选择器 ── */
+/* 由 base.html 提供 populateUserSelector() */
+
 let currentPage = 1;
 
 function getPageSize() {
@@ -301,15 +411,21 @@ async function loadBills(page) {
 
     if (bills.length === 0) {
       tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:#999;">暂无账单记录</td></tr>';
+      document.getElementById('billsCards').innerHTML = '<div class="bill-card-empty">暂无账单记录</div>';
       return;
     }
 
+    // ── 表格行（桌面端） ──
     let html = '';
+    // ── 卡片（手机端） ──
+    let cardsHtml = '';
     bills.forEach(b => {
       const typeClass = b.bill_type === 'income' ? 'type-income' : 'type-expense';
       const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
       const amtClass = parseInt(b.amount || 0) >= 0 ? 'amt-positive' : 'amt-negative';
       const reconClass = b.reconciliation_flag === '1' ? 'recon-yes' : 'recon-no';
+      const userName = window._renderUser ? window._renderUser(b.created_by) : (b.created_by || '');
+      // 表格行
       html += '<tr>';
       html += '<td style="padding:12px 14px;color:#888;font-size:12px;">' + b.id + '</td>';
       html += '<td style="padding:12px 14px;text-align:center;"><span class="type-badge ' + typeClass + '">' + typeLabel + '</span></td>';
@@ -317,7 +433,7 @@ async function loadBills(page) {
       html += '<td style="padding:12px 14px;color:#888;">' + escapeHtml(b.account_name || b.account_id || '') + '</td>';
       html += '<td style="padding:12px 14px;text-align:right;font-weight:600;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
       html += '<td style="padding:12px 14px;color:#888;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(b.comment || '') + '">' + escapeHtml(b.comment || '') + '</td>';
-      html += '<td style="padding:12px 14px;">' + escapeHtml(window._renderUser ? window._renderUser(b.created_by) : (b.created_by || '')) + '</td>';
+      html += '<td style="padding:12px 14px;">' + escapeHtml(userName) + '</td>';
       html += '<td style="padding:12px 14px;text-align:center;font-size:12px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
       html += '<td style="padding:12px 14px;text-align:center;"><span class="recon-badge ' + reconClass + '">' + (b.reconciliation_flag === '1' ? '是' : '否') + '</span></td>';
       html += '<td style="padding:12px 14px;font-size:12px;color:#888;">' + escapeHtml(b.reconciliation_no || '') + '</td>';
@@ -327,8 +443,31 @@ async function loadBills(page) {
       }
       html += '</td>';
       html += '</tr>';
+      // 卡片
+      cardsHtml += '<div class="bill-card" onclick="openEditModal(' + b.id + ')">';
+      cardsHtml += '<div class="card-row card-top">';
+      cardsHtml += '  <span class="type-badge ' + typeClass + '">' + typeLabel + '</span>';
+      cardsHtml += '  <span class="card-amount ' + amtClass + '">¥' + fmtMoney(b.amount) + '</span>';
+      cardsHtml += '</div>';
+      cardsHtml += '<div class="card-row card-mid">';
+      cardsHtml += '  <span><span class="card-label">科目</span>' + escapeHtml(b.category_name || '') + '</span>';
+      cardsHtml += '  <span><span class="card-label">账户</span>' + escapeHtml(b.account_name || b.account_id || '') + '</span>';
+      cardsHtml += '</div>';
+      if (b.comment) {
+        cardsHtml += '<div class="card-row card-comment" title="' + escapeHtml(b.comment) + '">📝 ' + escapeHtml(b.comment) + '</div>';
+      }
+      cardsHtml += '<div class="card-row card-bottom">';
+      cardsHtml += '  <span>👤 ' + escapeHtml(userName) + '</span>';
+      cardsHtml += '  <span>🕐 ' + escapeHtml(b.transaction_time || '') + '</span>';
+      cardsHtml += '  <span class="recon-badge ' + reconClass + '">' + (b.reconciliation_flag === '1' ? '✅ 已对账' : '◻️ 未对账') + '</span>';
+      if (b.reconciliation_no) {
+        cardsHtml += '  <span class="card-recon-no">#' + escapeHtml(b.reconciliation_no) + '</span>';
+      }
+      cardsHtml += '</div>';
+      cardsHtml += '</div>';
     });
     tbody.innerHTML = html;
+    document.getElementById('billsCards').innerHTML = cardsHtml;
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
   }
@@ -362,8 +501,14 @@ function openEditModal(billId) {
   document.getElementById('editTypeDisplay').textContent = typeLabel;
   document.getElementById('editAmount').value = Math.abs(bill.amount || 0) / 100;
   document.getElementById('editComment').value = bill.comment || '';
-  document.getElementById('editSourceUser').value = bill.created_by || '';
   document.getElementById('editTime').value = bill.transaction_time || '';
+  // 填充记账人（管理员可见 select，普通用户见只读）
+  var userField = document.getElementById('editSourceUser');
+  {% if session_is_admin %}
+  populateUserSelector('editSourceUser', bill.created_by || '');
+  {% else %}
+  userField.value = bill.created_by || '';
+  {% endif %}
 
   // 加载科目下拉
   const catSel = document.getElementById('editCategory');

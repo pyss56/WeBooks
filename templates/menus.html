@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block title %}菜单管理{% endblock %}
+{% block content %}
+<h2>📐 菜单管理</h2>
+<p class="subtitle">自定义侧边栏菜单项</p>
+
+<div style="display:flex;gap:12px;margin-bottom:16px;">
+  <button class="btn btn-primary" onclick="openCreateModal()">➕ 新增菜单</button>
+</div>
+
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+<div class="table-wrap">
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:#fafafa;border-bottom:1px solid #eee;">
+        <th style="padding:12px 14px;text-align:center;color:#555;width:40px;">排序</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;width:40px;">图标</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">名称</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">类型</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">父级</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">链接</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;width:50px;">展开</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;">状态</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;width:100px;">操作</th>
+      </tr>
+    </thead>
+    <tbody id="menuBody">
+      <tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal" style="width:500px;">
+    <h3 id="editTitle">新增菜单</h3>
+    <input type="hidden" id="editId">
+    <div class="field">
+      <label>图标（Emoji）</label>
+      <input type="text" id="editIcon" placeholder="📄" maxlength="10">
+    </div>
+    <div class="field">
+      <label>名称 <span style="color:#e4393c;">*</span></label>
+      <input type="text" id="editLabel" placeholder="如：首页">
+    </div>
+    <div class="field">
+      <label>类型</label>
+      <select id="editType" onchange="toggleUrlField()">
+        <option value="dir">📁 目录（分组）</option>
+        <option value="page">📄 页面（链接）</option>
+        <option value="btn">🔘 按键（操作）</option>
+      </select>
+    </div>
+    <div class="field" id="urlField">
+      <label>链接 <span style="color:#e4393c;">*</span></label>
+      <input type="text" id="editUrl" placeholder="如：/" value="/">
+    </div>
+    <div class="field">
+      <label>父级</label>
+      <select id="editParent">
+        <option value="0">无（顶级）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>排序</label>
+      <input type="number" id="editSort" value="0" min="0">
+    </div>
+    <div class="field" id="editExpandedField" style="display:none;">
+      <label>目录状态</label>
+      <select id="editExpanded">
+        <option value="1">展开</option>
+        <option value="0">折叠</option>
+      </select>
+    </div>
+    <div class="field" id="editActiveField" style="display:none;">
+      <label>状态</label>
+      <select id="editActive">
+        <option value="1">启用</option>
+        <option value="0">停用</option>
+      </select>
+    </div>
+    <div class="btns">
+      <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveMenu()">保存</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+  .badge { display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px; }
+  .badge-active { background:#e8f5e9;color:#2e7d32; }
+  .badge-inactive { background:#f5f5f5;color:#999; }
+  table tbody tr:hover { background:#f0f7ff; }
+  table tbody tr:nth-child(even) { background:#fafafa; }
+  .op-btn { padding:4px 8px;border:none;border-radius:3px;font-size:13px;cursor:pointer;background:none; }
+  .op-btn.edit:hover { background:#e3f2fd; }
+  .op-btn.del:hover { background:#fce4ec; }
+{% endblock %}
+
+{% block extra_script %}
+function $(id) { return document.getElementById(id); }
+
+async function loadMenus() {
+  var tbody = $('menuBody');
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+  try {
+    var resp = await fetch('/api/menus/list');
+    var result = await resp.json();
+    if (!result.success) throw new Error(result.message);
+    var menus = result.data || [];
+    if (menus.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">暂无菜单</td></tr>';
+      return;
+    }
+    var html = '';
+    // 构建父子映射表
+    var byParent = {};
+    menus.forEach(function(m) { byParent[m.id] = m; });
+    // 递归渲染树（最多3级）
+    function renderRow(m, depth) {
+      if (!m) return '';
+      var activeLabel = m.is_active ? '启用' : '停用';
+      var activeClass = m.is_active ? 'badge-active' : 'badge-inactive';
+      var typeLabel = {dir: '📁 目录', page: '📄 页面', btn: '🔘 按键'}[m.type] || m.type;
+      var parentName = m.parent_id ? (byParent[m.parent_id] ? byParent[m.parent_id].label : 'ID:' + m.parent_id) : '—';
+      var pad = depth * 28;
+      var indent = pad ? 'padding-left:' + pad + 'px;' : '';
+      var prefix = '';
+      if (depth === 1) prefix = '└─ ';
+      if (depth === 2) prefix = '&emsp;↳ ';
+      var row = '<tr>';
+      row += '<td style="padding:12px 14px;text-align:center;color:#888;">' + m.sort_order + '</td>';
+      row += '<td style="padding:12px 14px;text-align:center;font-size:18px;">' + (m.icon || '📄') + '</td>';
+      row += '<td style="padding:12px 14px;font-weight:600;' + indent + '">' + prefix + escapeHtml(m.label) + '</td>';
+      row += '<td style="padding:12px 14px;color:#888;font-size:12px;">' + typeLabel + '</td>';
+      row += '<td style="padding:12px 14px;color:#888;font-size:12px;">' + escapeHtml(parentName) + '</td>';
+      row += '<td style="padding:12px 14px;color:#888;font-size:12px;">' + escapeHtml(m.url || '') + '</td>';
+      var expandedLabel = (m.type === 'dir') ? (m.default_expanded ? '展开' : '收起') : '—';
+      row += '<td style="padding:12px 14px;text-align:center;font-size:11px;color:#888;">' + expandedLabel + '</td>';
+      row += '<td style="padding:12px 14px;text-align:center;"><span class="badge ' + activeClass + '">' + activeLabel + '</span></td>';
+      row += '<td style="padding:12px 14px;text-align:center;">';
+      row += '<button class="op-btn edit" onclick="openEditModal(' + m.id + ')">✏️</button>';
+      row += '<button class="op-btn del" onclick="deleteMenu(' + m.id + ')">🗑️</button>';
+      row += '</td></tr>';
+      return row;
+    }
+    // 先渲染顶级（dir 和 page）
+    var tops = menus.filter(function(m) { return m.parent_id === 0 || !byParent[m.parent_id]; });
+    tops.forEach(function(top) {
+      html += renderRow(top, 0);
+      if (top.type === 'dir') {
+        // 二级：属于此目录的 page
+        var children = menus.filter(function(m) { return m.parent_id === top.id && m.type === 'page'; });
+        children.forEach(function(child) {
+          html += renderRow(child, 1);
+          // 三级：属于此 page 的 btn
+          var btns = menus.filter(function(m) { return m.parent_id === child.id && m.type === 'btn'; });
+          btns.forEach(function(btn) { html += renderRow(btn, 2); });
+        });
+        // 也显示直接挂在 dir 下的 btn
+        var dirBtns = menus.filter(function(m) { return m.parent_id === top.id && m.type === 'btn'; });
+        dirBtns.forEach(function(btn) { html += renderRow(btn, 1); });
+      }
+    });
+    tbody.innerHTML = html;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function openCreateModal() {
+  $('editTitle').textContent = '➕ 新增菜单';
+  $('editId').value = '';
+  $('editIcon').value = '📄';
+  $('editLabel').value = '';
+  $('editUrl').value = '/';
+  $('editSort').value = '0';
+  $('editType').value = 'page';
+  $('editParent').value = '0';
+  $('editActiveField').style.display = 'none';
+  $('editExpandedField').style.display = 'none';
+  toggleUrlField();
+  $('editModal').classList.add('active');
+}
+
+function toggleUrlField() {
+  var typ = $('editType').value;
+  $('urlField').style.display = (typ === 'page' || typ === 'btn') ? '' : 'none';
+  $('editExpandedField').style.display = (typ === 'dir') ? '' : 'none';
+  if (typ === 'dir') $('editUrl').value = '';
+  if (typ === 'page' && !$('editUrl').value) $('editUrl').value = '/';
+}
+
+async function openEditModal(id) {
+  $('editTitle').textContent = '✏️ 编辑菜单';
+  $('editId').value = id;
+  $('editActiveField').style.display = '';
+  try {
+    var resp = await fetch('/api/menus/list');
+    var result = await resp.json();
+    var allMenus = result.data || [];
+    var menu = allMenus.find(function(m) { return m.id === id; });
+    if (!menu) { showToast('❌ 菜单不存在', 'error'); return; }
+    $('editIcon').value = menu.icon || '📄';
+    $('editLabel').value = menu.label;
+    $('editUrl').value = menu.url || '';
+    $('editSort').value = menu.sort_order;
+    $('editType').value = menu.type || 'page';
+    $('editExpandedField').style.display = (menu.type === 'dir') ? '' : 'none';
+    $('editExpanded').value = menu.default_expanded ? '1' : '0';
+    // 填充父级下拉
+    var parentSel = $('editParent');
+    parentSel.innerHTML = '<option value="0">无（顶级）</option>';
+    allMenus.forEach(function(m) {
+      if (m.id === id) return;
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = (m.type === 'dir' ? '📁 ' : '  ') + m.label;
+      if (String(m.id) === String(menu.parent_id)) opt.selected = true;
+      parentSel.appendChild(opt);
+    });
+    $('editActive').value = menu.is_active ? '1' : '0';
+    $('editModal').classList.add('active');
+  } catch (e) {
+    showToast('❌ 加载失败', 'error');
+  }
+}
+
+function closeEditModal() {
+  $('editModal').classList.remove('active');
+}
+
+async function saveMenu() {
+  var id = $('editId').value;
+  var typ = $('editType').value;
+  var icon = $('editIcon').value.trim() || '📄';
+  var label = $('editLabel').value.trim();
+  var url = $('editUrl').value.trim();
+  var parentId = parseInt($('editParent').value) || 0;
+  var sortOrder = parseInt($('editSort').value) || 0;
+
+  if (!label) { showToast('❌ 请输入名称', 'error'); return; }
+  if (typ === 'page' && (!url || !url.startsWith('/'))) { showToast('❌ 页面类型必须填写以 / 开头的链接', 'error'); return; }
+  if (typ === 'dir') url = '';
+  if (typ === 'btn' && !url) { showToast('❌ 按键类型请填写操作标识', 'error'); return; }
+
+  var data = {icon: icon, label: label, url: url, sort_order: sortOrder, parent_id: parentId, type: typ};
+  if (typ === 'dir') data.default_expanded = parseInt($('editExpanded').value) || 0;
+  var apiUrl = id ? '/api/menus/update' : '/api/menus/create';
+  if (id) { data.id = id; data.is_active = parseInt($('editActive').value); }
+
+  try {
+    var resp = await fetch(apiUrl, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast('✅ ' + result.message, 'success');
+      closeEditModal();
+      loadMenus();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('❌ 操作失败', 'error');
+  }
+}
+
+async function deleteMenu(id) {
+  if (!confirm('确定要删除此菜单？')) return;
+  try {
+    var resp = await fetch('/api/menus/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: id}),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast('✅ 已删除', 'success');
+      loadMenus();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('❌ 删除失败', 'error');
+  }
+}
+
+loadMenus();
+{% endblock %}

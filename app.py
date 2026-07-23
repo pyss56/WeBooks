@@ -37,8 +37,8 @@ if _entry_code:
         - 未登录用户：仅公开路径可访问（login、企微回调、消息卡片页等），其他一律跳转
         - 有前缀时剥离前缀，拦截 302 给 Location 补回前缀
         """
-        # 无前缀也可访问的路径（企微回调、消息卡片跳转）
-        _no_prefix = ('/qywx/', '/s/t/', '/s/go/', '/s/cb/', '/tx/')
+        # 无前缀也可访问的路径（企微回调、消息卡片跳转、PWA 资源）
+        _no_prefix = ('/qywx/', '/s/t/', '/s/go/', '/s/cb/', '/tx/', '/static/', '/manifest.json', '/sw.js')
         # 需前缀但无需登录的路径
         _no_auth = ('/login', '/logout')
 
@@ -115,7 +115,7 @@ if _entry_code:
     app.wsgi_app = _EntryCodeMiddleware(app.wsgi_app)
 
 # 日志配置
-LOG_DIR = 'logs'
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 LOG_RETENTION_DAYS = int(os.getenv('LOG_RETENTION_DAYS', '60'))
 LOG_RETENTION_HOURS = LOG_RETENTION_DAYS * 24
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -246,6 +246,8 @@ from routes.budgets import bp as bp_budgets
 from routes.scheduler import bp as bp_scheduler, init_scheduler_routes
 from routes.aliases import bp as bp_aliases
 from routes.summary_view import bp as bp_summary_view
+from routes.menus import bp as bp_menus
+from routes.roles import bp as bp_roles
 
 app.register_blueprint(bp_transactions)
 app.register_blueprint(bp_accounts)
@@ -256,6 +258,8 @@ app.register_blueprint(bp_budgets)
 app.register_blueprint(bp_scheduler)
 app.register_blueprint(bp_aliases)
 app.register_blueprint(bp_summary_view)
+app.register_blueprint(bp_menus)
+app.register_blueprint(bp_roles)
 
 # 注入 scheduler 依赖到 scheduler blueprint
 _TASK_FUNCS = {
@@ -266,6 +270,84 @@ init_scheduler_routes(scheduler, _TASK_FUNCS)
 
 # ============ 通用认证 ============
 init_auth_routes(app, config)
+
+
+# ============ 模板上下文注入 ============
+
+@app.context_processor
+def inject_globals():
+    """注入全局模板变量（按角色过滤菜单）"""
+    from db import get_menus_for_user, get_all_menus
+    is_admin = session.get('is_admin', False)
+    if is_admin:
+        menus = [m for m in get_all_menus() if m.get('is_active')]
+    else:
+        role_codes = session.get('role_codes', [])
+        menus = get_menus_for_user(role_codes)
+    # 构建菜单树（一级和二级）
+    menu_tree = []
+    for m in menus:
+        if m['parent_id'] == 0:
+            clone = dict(m)
+            clone['children'] = [c for c in menus if c['parent_id'] == m['id']]
+            menu_tree.append(clone)
+    return dict(
+        menus=menus,
+        menu_tree=menu_tree,
+        session_is_admin=is_admin,
+        session_username=session.get('username', ''),
+        session_user_code=session.get('user_code', ''),
+        session_role_codes=session.get('role_codes', []),
+    )
+
+
+# ============ PWA 支持 ============
+
+@app.route('/manifest.json')
+def manifest_json():
+    """PWA Web App Manifest"""
+    from version import __app_name__, __description__, __version__
+    manifest = {
+        "name": __app_name__,
+        "short_name": __app_name__,
+        "description": __description__,
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#f5f5f5",
+        "theme_color": "#07c160",
+        "orientation": "portrait",
+        "icons": [
+            {
+                "src": "/static/icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any maskable"
+            },
+            {
+                "src": "/static/icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any maskable"
+            }
+        ]
+    }
+    return manifest, 200, {'Content-Type': 'application/manifest+json; charset=utf-8'}
+
+
+@app.route('/sw.js')
+def service_worker():
+    """PWA Service Worker"""
+    from flask import make_response
+    sw_path = os.path.join(app.root_path, 'static', 'sw.js')
+    if os.path.exists(sw_path):
+        with open(sw_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        resp = make_response(content)
+        resp.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+        resp.headers['Service-Worker-Allowed'] = '/'
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
+    return '', 404
 
 
 def start_scheduler():
@@ -361,6 +443,11 @@ if __name__ == '__main__':
 
     # 初始化数据
     _seed_data()
+
+    # 从环境变量同步管理员到数据库
+    from db import sync_admin_user, init_menus
+    sync_admin_user(config)
+    init_menus()
 
     # 消息平台初始化
     if config.WECOM_CORP_ID and config.WECOM_CORP_SECRET:

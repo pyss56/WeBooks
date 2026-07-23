@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}对账管理{% endblock %}
-{% block nav_reconciliation %}active{% endblock %}
 
 {% block content %}
 <h2>✅ 对账管理</h2>
@@ -8,7 +7,7 @@
 
 <!-- 查询区域 -->
 <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
-  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+  <div class="recon-filter-grid" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
     <div>
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">对账号</label>
       <input type="text" id="queryNo" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:180px;">
@@ -30,18 +29,16 @@
         <option value="取消">已取消</option>
       </select>
     </div>
-    <div>
+    <div class="recon-filter-actions">
       <button class="btn btn-primary" onclick="loadList()">🔍 查询</button>
-    </div>
-    <div style="margin-left:auto;">
       <button class="btn btn-primary" id="createBtn">➕ 创建对账</button>
     </div>
   </div>
 </div>
 
 <!-- 列表区域 -->
-<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
-  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+<div class="recon-table-wrap" style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+  <table id="reconTable" style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead>
       <tr style="background:#fafafa;border-bottom:1px solid #eee;">
         <th style="padding:12px 16px;text-align:left;color:#555;">对账号</th>
@@ -59,6 +56,31 @@
       <tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>
     </tbody>
   </table>
+</div>
+<!-- 手机端卡片列表 -->
+<div id="reconCards" class="recon-cards"></div>
+
+<!-- 分页 -->
+<div class="recon-pagination" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;">
+  <div class="recon-page-size" style="display:flex;align-items:center;gap:4px;font-size:13px;color:#555;">
+    <label>每页</label>
+    <select id="reconPageSize" style="padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;" onchange="reconLoadList(1)">
+      <option value="10">10</option>
+      <option value="20" selected>20</option>
+      <option value="50">50</option>
+    </select>
+    <label>条</label>
+  </div>
+  <button class="btn btn-outline btn-sm recon-pc-only" id="reconFirstPage" onclick="reconLoadList(1)" disabled>首页</button>
+  <button class="btn btn-outline btn-sm" id="reconPrevPage" onclick="reconLoadList(reconCurrentPage - 1)" disabled>上一页</button>
+  <span style="font-size:13px;color:#555;" id="reconPageInfo">第 1 页</span>
+  <button class="btn btn-outline btn-sm" id="reconNextPage" onclick="reconLoadList(reconCurrentPage + 1)">下一页</button>
+  <button class="btn btn-outline btn-sm recon-pc-only" id="reconLastPage" onclick="reconGoLastPage()">末页</button>
+  <div class="recon-pc-only" style="display:flex;align-items:center;gap:4px;font-size:13px;color:#555;">
+    <label>跳至</label>
+    <input type="number" id="reconJumpPage" min="1" style="width:50px;padding:4px 6px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;text-align:center;" onkeydown="if(event.key==='Enter')reconJumpToPage()">
+    <button class="btn btn-primary btn-sm" onclick="reconJumpToPage()">GO</button>
+  </div>
 </div>
 
 <!-- 创建对账弹窗 -->
@@ -202,6 +224,86 @@
   .op-btn.cancel { background:#fce4ec;color:#c62828; }
   .op-btn.chart { background:#e8f5e9;color:#2e7d32; }
   .op-btn:disabled { opacity:0.5;cursor:not-allowed; }
+
+  /* ── 手机端卡片 ── */
+  .recon-cards { display: none; }
+  .recon-card-empty { text-align:center; padding:40px; color:#999; font-size:14px; }
+  .recon-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .recon-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .recon-card-no {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1565c0;
+    text-decoration: none;
+  }
+  .recon-card-amounts {
+    display: flex;
+    gap: 12px;
+    font-size: 15px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .recon-card-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .recon-card-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+  }
+
+  @media (max-width: 768px) {
+    .recon-table-wrap { display: none; }
+    .recon-cards { display: block; }
+    .recon-pc-only { display: none !important; }
+    .recon-filter-grid {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 10px !important;
+    }
+    .recon-filter-grid > div { min-width: 0 !important; }
+    .recon-filter-grid select,
+    .recon-filter-grid input {
+      width: 100% !important;
+      font-size: 14px !important;
+    }
+    .recon-filter-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    .recon-filter-actions .btn { margin-left: 0 !important; }
+  }
+  @media (max-width: 480px) {
+    .recon-filter-grid { grid-template-columns: 1fr !important; }
+  }
+
+  /* ── 分页手机适配 ── */
+  @media (max-width: 768px) {
+    .recon-pagination { gap: 6px !important; }
+    .recon-pagination .recon-page-size { order: 10; width: 100%; justify-content: center; margin-top: 4px; }
+    .recon-pagination button { font-size: 12px !important; padding: 4px 10px !important; }
+  }
 </style>
 {% endblock %}
 
@@ -209,6 +311,8 @@
 let currentReconciliationNo = '';
 let addedBills = [];
 var userMap = {};
+var reconCurrentPage = 1;
+var reconTotalPages = 1;
 
 function fmtMoney(v) {
   return Number(v / 100 || 0).toLocaleString('zh-CN', {minimumFractionDigits:2,maximumFractionDigits:2});
@@ -218,7 +322,30 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function reconGetPageSize() {
+  return parseInt(document.getElementById('reconPageSize').value) || 20;
+}
+
+function reconGoLastPage() {
+  reconLoadList(reconTotalPages);
+}
+
+function reconJumpToPage() {
+  const input = document.getElementById('reconJumpPage');
+  let p = parseInt(input.value);
+  if (isNaN(p) || p < 1) p = 1;
+  if (p > reconTotalPages) p = reconTotalPages;
+  reconLoadList(p);
+  input.value = p;
+}
+
 async function loadList() {
+  reconLoadList(1);
+}
+
+async function reconLoadList(page) {
+  reconCurrentPage = page;
+  const pageSize = reconGetPageSize();
   const tbody = document.getElementById('listBody');
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
   try {
@@ -232,15 +359,31 @@ async function loadList() {
     const dateTo = document.getElementById('queryDateTo').value;
     if (dateTo) params.set('date_to', dateTo);
 
+    params.set('limit', String(pageSize));
+    params.set('offset', String((page - 1) * pageSize));
+
     const resp = await fetch('/api/reconciliation/list?' + params.toString());
     const result = await resp.json();
     if (!result.success) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      document.getElementById('reconCards').innerHTML = '<div class="recon-card-empty">加载失败</div>';
       return;
     }
     const list = result.data || [];
+    const total = result.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    reconTotalPages = totalPages;
+
+    // 更新分页控件
+    document.getElementById('reconPageInfo').textContent = '第 ' + page + ' 页 / 共 ' + totalPages + ' 页（' + total + ' 条）';
+    document.getElementById('reconFirstPage').disabled = page <= 1;
+    document.getElementById('reconPrevPage').disabled = page <= 1;
+    document.getElementById('reconNextPage').disabled = page >= totalPages;
+    document.getElementById('reconLastPage').disabled = page >= totalPages;
+
     if (list.length === 0) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">暂无对账记录</td></tr>';
+      document.getElementById('reconCards').innerHTML = '<div class="recon-card-empty">暂无对账记录</div>';
       return;
     }
     let html = '';
@@ -265,9 +408,48 @@ async function loadList() {
       html += '</tr>';
     });
     tbody.innerHTML = html;
+    // ── 手机端卡片渲染 ──
+    renderReconCards(list);
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+    document.getElementById('reconCards').innerHTML = '<div class="recon-card-empty">加载失败</div>';
   }
+}
+
+function renderReconCards(list) {
+  var container = document.getElementById('reconCards');
+  if (!list || list.length === 0) {
+    container.innerHTML = '<div class="recon-card-empty">暂无对账记录</div>';
+    return;
+  }
+  var html = '';
+  list.forEach(function(item) {
+    var statusClass = item.status === '确认' ? 'status-confirmed' : (item.status === '取消' ? 'status-cancelled' : 'status-draft');
+    var canEdit = item.status === '草稿';
+    var balanceClass = parseInt(item.balance_amount || 0) >= 0 ? 'amt-income' : 'amt-expense';
+    html += '<div class="recon-card">';
+    html += '  <div class="recon-card-top">';
+    html += '    <a href="javascript:void(0)" onclick="openEdit(\'' + item.reconciliation_no + '\')" class="recon-card-no">#' + escapeHtml(item.reconciliation_no) + '</a>';
+    html += '    <span class="status-badge ' + statusClass + '">' + escapeHtml(item.status) + '</span>';
+    html += '  </div>';
+    html += '  <div class="recon-card-amounts">';
+    html += '    <span class="amt-income">+¥' + fmtMoney(item.income_amount) + '</span>';
+    html += '    <span class="amt-expense">-¥' + fmtMoney(item.expense_amount) + '</span>';
+    html += '    <span class="' + balanceClass + '" style="font-weight:600;">=¥' + fmtMoney(item.balance_amount) + '</span>';
+    html += '  </div>';
+    html += '  <div class="recon-card-meta">';
+    html += '    <span>✔️ ' + escapeHtml(item.confirm_flag) + '</span>';
+    html += '    <span>📅 ' + escapeHtml(item.created_at) + '</span>';
+    html += '  </div>';
+    html += '  <div class="recon-card-actions">';
+    html += '    <button class="op-btn edit" ' + (canEdit ? 'onclick="openEdit(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>✏️ 编辑</button>';
+    html += '    <button class="op-btn confirm" ' + (canEdit ? 'onclick="confirmRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>✅ 确认</button>';
+    html += '    <button class="op-btn cancel" ' + (canEdit ? 'onclick="cancelRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>❌ 取消</button>';
+    html += '    <button class="op-btn chart" onclick="showCategoryChart(\'' + item.reconciliation_no + '\')">📊 汇总</button>';
+    html += '  </div>';
+    html += '</div>';
+  });
+  container.innerHTML = html;
 }
 
 async function showCreateDialog() {

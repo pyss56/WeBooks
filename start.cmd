@@ -6,5 +6,5 @@ taskkill /f /im python.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 set FLASK_DEBUG=1
 echo 正在启动企业微信记账助手...
-call .venv\Scripts\python.exe app.py
+call python.exe app.py
 pause

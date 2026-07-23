@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}页面记账{% endblock %}
+
+{% block content %}
+<h2>📝 页面记账</h2>
+<p class="subtitle">在浏览器中快速记录一笔交易</p>
+
+<div class="toast" id="toast"></div>
+
+<div class="card" style="max-width:520px;">
+  <div class="card-header" style="padding-bottom:0;border-bottom:none;">
+    <!-- 类型切换 -->
+    <div style="display:flex;gap:0;margin-bottom:20px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+      <button type="button" class="type-btn" data-type="expense" onclick="switchType('expense')"
+        style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#e4393c;color:#fff;">
+        💸 支出
+      </button>
+      <button type="button" class="type-btn" data-type="income" onclick="switchType('income')"
+        style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#f5f5f5;color:#888;">
+        💰 收入
+      </button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="field">
+      <label>科目 <span style="color:#e4393c;">*</span></label>
+      <select id="categorySelect" onchange="clearError()">
+        <option value="">请选择科目</option>
+        {% for cat in expense_categories %}
+        <option value="{{ cat.id }}" data-name="{{ cat.name }}"
+          {% if cat.parent_name %}data-parent="{{ cat.parent_name }}"{% endif %}>
+          {{ cat.name }}{% if cat.parent_name %}（{{ cat.parent_name }}）{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>金额（元）<span style="color:#e4393c;">*</span></label>
+      <div style="position:relative;">
+        <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:18px;color:#bbb;font-weight:600;">¥</span>
+        <input type="number" id="amountInput" step="0.01" min="0.01" placeholder="0.00"
+          style="padding-left:36px;" oninput="clearError()">
+      </div>
+    </div>
+    <div class="field">
+      <label>账户 <span style="color:#e4393c;">*</span></label>
+      <select id="accountSelect" onchange="clearError()">
+        <option value="">请选择账户</option>
+        {% for acct in accounts %}
+        <option value="{{ acct.id }}"{% if acct.id|string == default_account_id|string %} selected{% endif %}>
+          {{ acct.name }}{% if acct._display_name and acct._display_name != acct.name %}（{{ acct._display_name.replace(acct.name, '').strip('()') }}）{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>备注</label>
+      <input type="text" id="commentInput" placeholder="可选，如：地铁、午餐等">
+    </div>
+    <div class="field">
+      <label>记账人</label>
+      {% if session_is_admin %}
+      <select id="userSelect">
+        <option value="">默认（{{ session_username }}）</option>
+        {% for u in users %}
+        <option value="{{ u.code }}" {% if u.code == session_user_code %}selected{% endif %}>{{ u.name }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <div style="padding:10px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;color:#555;">
+        👤 {{ session_username }}
+        <input type="hidden" id="userSelect" value="{{ session_user_code }}">
+      </div>
+      {% endif %}
+    </div>
+    <div class="field">
+      <label>记账时间</label>
+      <input type="datetime-local" id="timeInput" value="{{ now }}">
+    </div>
+
+    <div id="errorMsg" style="display:none;background:#fce4ec;color:#c62828;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;"></div>
+
+    <div style="display:flex;gap:8px;">
+      <button id="submitBtn" class="btn" style="flex:1;" onclick="submitTransaction()">✅ 确认记账</button>
+    </div>
+  </div>
+</div>
+
+<!-- 成功卡片 -->
+<div class="card" id="resultBox" style="display:none;max-width:520px;margin-top:16px;">
+  <div class="msg-box">
+    <span class="big-icon">✅</span>
+    <p id="resultTitle" style="font-size:18px;font-weight:600;color:#07c160;">交易已创建</p>
+    <p id="resultDetail" class="sub" style="margin-top:4px;"></p>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:center;">
+      <button class="btn" onclick="resetForm()">继续记账</button>
+      <a href="/transaction" class="btn btn-outline">查看交易</a>
+    </div>
+  </div>
+</div>
+
+<!-- 快捷操作提示 -->
+<div class="card" style="max-width:520px;margin-top:16px;padding:16px 20px;">
+  <details>
+    <summary style="cursor:pointer;font-size:13px;color:#888;font-weight:600;outline:none;">💡 记账技巧</summary>
+    <div style="margin-top:10px;font-size:13px;color:#666;line-height:1.8;">
+      <p>• 选择 <strong>科目</strong> 后系统会记录对应分类</p>
+      <p>• 金额支持两位小数，如 <code>12.50</code></p>
+      <p>• 如需记录 <strong>转账</strong>，请前往转账配置页面操作</p>
+      <p>• 记账后可在 <a href="/transaction" style="color:#07c160;">交易查询</a> 中查看、编辑或删除</p>
+    </div>
+  </details>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+<style>
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+.card-header { padding: 24px 24px 16px; }
+.card-body { padding: 0 24px 24px; }
+.msg-box { text-align: center; padding: 40px 24px; }
+.msg-box .big-icon { font-size: 48px; margin-bottom: 12px; display: block; }
+.msg-box .sub { color: #999; font-size: 13px; }
+.field { margin-bottom: 16px; }
+.field label {
+  display: block;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 4px;
+}
+.field input, .field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+.field input:focus, .field select:focus {
+  border-color: #07c160 !important;
+  box-shadow: 0 0 0 2px rgba(7,193,96,0.1);
+}
+.btn {
+  display: inline-block;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-decoration: none;
+  color: #fff;
+  background: #07c160;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+.btn:hover { background: #06ad56; }
+.btn:disabled { background: #94dbb0; cursor: not-allowed; }
+.btn-outline {
+  background: #fff;
+  color: #333;
+  border: 1px solid #d9d9d9 !important;
+}
+.btn-outline:hover { border-color: #07c160 !important; color: #07c160; }
+.toast {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  z-index: 2000; padding: 10px 24px; border-radius: 8px;
+  font-size: 14px; color: #fff; display: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.toast.success { background: #07c160; }
+.toast.error { background: #e4393c; }
+.toast.show { display: block; animation: fadeIn .3s; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.type-btn { outline: none; }
+.type-btn:hover { filter: brightness(0.95); }
+code {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+</style>
+{% endblock %}
+
+{% block extra_script %}
+var EXPENSE_CATEGORIES = {{ expense_categories | tojson | safe }};
+var INCOME_CATEGORIES = {{ income_categories | tojson | safe }};
+var currentType = 'expense';
+
+function $(id) { return document.getElementById(id); }
+
+function showToast(msg, type) {
+  var t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function() { t.classList.remove('show'); }, 3000);
+}
+
+function switchType(type) {
+  currentType = type;
+  var btns = document.querySelectorAll('.type-btn');
+  btns.forEach(function(btn) {
+    var isActive = btn.dataset.type === type;
+    btn.style.background = isActive ? (type === 'expense' ? '#e4393c' : '#2e7d32') : '#f5f5f5';
+    btn.style.color = isActive ? '#fff' : '#888';
+  });
+  var sel = $('categorySelect');
+  sel.innerHTML = '<option value="">请选择科目</option>';
+  var cats = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+  cats.forEach(function(cat) {
+    var opt = document.createElement('option');
+    opt.value = cat.id;
+    opt.textContent = cat.name + (cat.parent_name ? '（' + cat.parent_name + '）' : '');
+    sel.appendChild(opt);
+  });
+  clearError();
+}
+
+function clearError() {
+  var el = $('errorMsg');
+  el.style.display = 'none';
+}
+
+function showError(msg) {
+  var el = $('errorMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function resetForm() {
+  $('resultBox').style.display = 'none';
+  $('submitBtn').style.display = '';
+  $('amountInput').value = '';
+  $('commentInput').value = '';
+  $('categorySelect').value = '';
+  $('accountSelect').value = '';
+  {% if session_is_admin %}
+  $('userSelect').value = '';
+  {% else %}
+  $('userSelect').value = '{{ session_user_code }}';
+  {% endif %}
+  var now = new Date();
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  $('timeInput').value =
+    now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + 'T' +
+    pad(now.getHours()) + ':' + pad(now.getMinutes());
+  clearError();
+}
+
+async function submitTransaction() {
+  var categoryId = $('categorySelect').value;
+  var amount = $('amountInput').value;
+  var accountId = $('accountSelect').value;
+  var comment = $('commentInput').value.trim();
+  var userCode = $('userSelect').value;
+  var transactionTime = $('timeInput').value;
+
+  if (!categoryId) { showError('请选择科目'); return; }
+  if (!amount || parseFloat(amount) <= 0) { showError('请输入有效的金额（大于0）'); return; }
+  if (!accountId) { showError('请选择账户'); return; }
+
+  var btn = $('submitBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 提交中...';
+
+  try {
+    var catSel = $('categorySelect');
+    var catText = catSel.options[catSel.selectedIndex].textContent.split('（')[0] || '';
+
+    var resp = await fetch('/api/transactions/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bill_type: currentType,
+        category_name: catText,
+        amount: parseFloat(amount),
+        account_id: accountId,
+        comment: comment,
+        user_code: userCode || null,
+        transaction_time: transactionTime ? transactionTime.replace('T', ' ') + ':00' : undefined,
+      }),
+    });
+    var result = await resp.json();
+
+    if (result.success) {
+      var title = currentType === 'expense' ? '💸 支出已记录' : '💰 收入已记录';
+      var detail = '金额：¥' + parseFloat(amount).toFixed(2);
+      $('resultTitle').textContent = title;
+      $('resultDetail').textContent = detail;
+      $('resultBox').style.display = '';
+      $('submitBtn').style.display = 'none';
+      showToast('✅ 交易已创建', 'success');
+    } else {
+      showError(result.message || '创建交易失败');
+    }
+  } catch (e) {
+    showError('网络错误，请重试');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✅ 确认记账';
+  }
+}
+{% endblock %}

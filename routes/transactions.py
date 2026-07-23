@@ -1,5 +1,6 @@
 """交易查询、修改、删除 API"""
 import logging
+from datetime import datetime
 from flask import Blueprint, request, jsonify, session, render_template
 from auth import login_required
 
@@ -347,39 +348,208 @@ def _validate_uuid(tx_uuid):
 
 @bp.route('/api/transactions/by-uuid/accounts', methods=['GET'])
 def api_transactions_by_uuid_accounts():
-    """通过 UUID 获取账户列表（按交易所属用户过滤，展平为叶子列表，无需登录）"""
+    """通过 UUID 获取账户列表（按交易所属用户过滤，无需登录，无严格过期限制）"""
     tx_uuid = request.args.get('uuid', '')
-    tx, err = _validate_uuid(tx_uuid)
-    if err:
-        return err
-    from db import get_flat_accounts
-    return jsonify({'success': True, 'data': get_flat_accounts(tx.get('user_code', ''))})
+    from db import get_connection, get_flat_accounts
+    _conn = get_connection()
+    _row = _conn.execute("SELECT user_code FROM \"transaction\" WHERE uuid=?", (tx_uuid,)).fetchone()
+    _conn.close()
+    if not _row:
+        return jsonify({'success': False, 'message': '交易不存在'}), 404
+    return jsonify({'success': True, 'data': get_flat_accounts(_row['user_code'] or '')})
 
 
 @bp.route('/api/transactions/by-uuid/categories', methods=['GET'])
 def api_transactions_by_uuid_categories():
-    """通过 UUID 获取科目列表（无需登录）"""
+    """通过 UUID 获取科目列表（无需登录，无严格过期限制）"""
     tx_uuid = request.args.get('uuid', '')
     bill_type = request.args.get('bill_type', 'expense')
-    tx, err = _validate_uuid(tx_uuid)
-    if err:
-        return err
+    # 仅检查 UUID 是否存在（不强制 5 分钟过期）
+    from db import get_connection
+    _conn = get_connection()
+    _exists = _conn.execute("SELECT id FROM \"transaction\" WHERE uuid=?", (tx_uuid,)).fetchone()
+    _conn.close()
+    if not _exists:
+        return jsonify({'success': False, 'message': '交易不存在'}), 404
     try:
         if bill_type == 'transfer':
             return jsonify({'success': True, 'data': []})
         from books.client import BookkeepingClient
         bk = BookkeepingClient()
-        cat_type = 2 if bill_type == 'expense' else 1
+        cat_type = bill_type  # 'expense' 或 'income'
         categories = bk.get_categories(category_type=cat_type)
-        leaf_names = []
+        leaf_cats = []
         for cat in categories:
             subs = cat.get('subCategories', [])
             if subs:
                 for sub in subs:
-                    leaf_names.append(sub.get('name', ''))
+                    leaf_cats.append({'id': sub.get('id', ''), 'name': sub.get('name', '')})
             else:
-                leaf_names.append(cat.get('name', ''))
-        return jsonify({'success': True, 'data': leaf_names})
+                leaf_cats.append({'id': cat.get('id', ''), 'name': cat.get('name', '')})
+        return jsonify({'success': True, 'data': leaf_cats})
     except Exception as e:
         logger.error(f"UUID获取科目列表异常: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ============ 页面记账 ============
+
+@bp.route('/add-transaction')
+@login_required
+def add_transaction_page():
+    """页面记账页面"""
+    from version import __app_name__, __version__
+    from books.client import BookkeepingClient
+    from db import get_flat_accounts, get_users
+
+    bk = BookkeepingClient()
+
+    # 获取支出科目（叶子节点列表）
+    expense_cats = bk.get_categories(category_type='expense')
+    expense_leaves = []
+    for parent in expense_cats:
+        subs = parent.get('subCategories', [])
+        if subs:
+            for sub in subs:
+                expense_leaves.append({
+                    'id': sub['id'],
+                    'name': sub['name'],
+                    'parent_name': parent['name'],
+                })
+        else:
+            expense_leaves.append({
+                'id': parent['id'],
+                'name': parent['name'],
+                'parent_name': '',
+            })
+
+    # 获取收入科目（叶子节点列表）
+    income_cats = bk.get_categories(category_type='income')
+    income_leaves = []
+    for parent in income_cats:
+        subs = parent.get('subCategories', [])
+        if subs:
+            for sub in subs:
+                income_leaves.append({
+                    'id': sub['id'],
+                    'name': sub['name'],
+                    'parent_name': parent['name'],
+                })
+        else:
+            income_leaves.append({
+                'id': parent['id'],
+                'name': parent['name'],
+                'parent_name': '',
+            })
+
+    # 获取扁平账户列表（过滤为当前用户可见或未绑定的）
+    accounts = get_flat_accounts(session.get('user_code'))
+    is_admin = session.get('is_admin', False)
+    user_code = session.get('user_code', '')
+    username = session.get('username', '')
+
+    # 获取当前用户的默认账户
+    default_account_id = ''
+    if user_code:
+        from db import get_user_account
+        default_account_id = get_user_account(user_code, direction='expense') or ''
+        if not default_account_id:
+            default_account_id = get_user_account(user_code, direction='income') or ''
+
+    # 获取启用用户列表
+    users = [u for u in get_users(status=1) if not u.get('deleted_at')]
+
+    return render_template(
+        'add_transaction.html',
+        app_name=__app_name__,
+        version=__version__,
+        now=datetime.now().strftime('%Y-%m-%d %H:%M'),
+        expense_categories=expense_leaves,
+        income_categories=income_leaves,
+        accounts=accounts,
+        users=users,
+        session_is_admin=is_admin,
+        session_user_code=user_code,
+        session_username=username,
+        default_account_id=default_account_id,
+    )
+
+
+@bp.route('/api/transactions/create', methods=['POST'])
+@login_required
+def api_transactions_create():
+    """从页面创建交易记录"""
+    data = request.get_json() or {}
+    bill_type = data.get('bill_type', 'expense')  # expense / income
+    category_name = data.get('category_name', '').strip()
+    try:
+        amount_val = float(data.get('amount', 0))
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'message': '金额格式错误'}), 400
+    comment = (data.get('comment') or '').strip()
+    user_code = data.get('user_code') or session.get('user_code')
+    is_admin = session.get('is_admin', False)
+    created_by = session.get('username', '')
+
+    # 非管理员只能用自己
+    if not is_admin:
+        user_code = session.get('user_code')
+
+    if not user_code:
+        return jsonify({'success': False, 'message': '未指定记账人'}), 400
+
+    transaction_time = data.get('transaction_time') or None
+    account_id = data.get('account_id', '').strip()
+
+    if not category_name:
+        return jsonify({'success': False, 'message': '请选择科目'}), 400
+    if amount_val <= 0:
+        return jsonify({'success': False, 'message': '金额必须大于0'}), 400
+    if not account_id:
+        return jsonify({'success': False, 'message': '请选择账户'}), 400
+
+    # 确定收支方向
+    if bill_type == 'income':
+        transaction_type = 2
+    else:
+        transaction_type = 3  # expense
+
+    # 调用核心记账逻辑
+    from books.client import BookkeepingClient
+    bk = BookkeepingClient()
+
+    # 查找科目ID
+    from db import get_connection
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "SELECT id, name FROM categories WHERE name=? AND parent_id!='0' LIMIT 1",
+            (category_name,)
+        )
+        cat_row = cur.fetchone()
+        if not cat_row:
+            return jsonify({'success': False, 'message': f'科目不存在: {category_name}'}), 400
+        category_id = cat_row['id']
+    finally:
+        conn.close()
+
+    # 创建交易（使用 web 作为 source）
+    result = bk.create_transaction(
+        category_id=category_id,
+        amount=amount_val,
+        account_id=account_id,
+        comment=comment,
+        transaction_time=transaction_time,
+        transaction_type=transaction_type,
+        created_by=created_by,
+        user_code=user_code,
+        source='web',
+        source_user=created_by,
+        raw_message=None,
+        message_log_id=None,
+    )
+
+    if result.get('success'):
+        return jsonify({'success': True, 'message': '交易创建成功', 'data': result.get('result')})
+    else:
+        return jsonify({'success': False, 'message': result.get('errorMessage', '创建交易失败')}), 500

@@ -190,8 +190,12 @@ class BookkeepingClient:
                            raw_message=None, message_log_id=None):
         from db import add_transaction, get_connection
         from datetime import datetime
-        if transaction_time is None: transaction_time = datetime.now()
-        bt = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
+        if transaction_time is None:
+            transaction_time = datetime.now()
+        if isinstance(transaction_time, str):
+            bt = transaction_time
+        else:
+            bt = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
         bill_type = 'income' if transaction_type == 2 else 'expense'
         # 负值表示退款，保持原值不变
         if amount < 0:
@@ -279,8 +283,12 @@ class BookkeepingClient:
                         raw_message=None, message_log_id=None):
         from db import add_transaction, get_connection
         from datetime import datetime
-        if transaction_time is None: transaction_time = datetime.now()
-        bt = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
+        if transaction_time is None:
+            transaction_time = datetime.now()
+        if isinstance(transaction_time, str):
+            bt = transaction_time
+        else:
+            bt = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
         # 查账户名称和币种
         from_name = ''
         to_name = ''

@@ -26,3 +26,6 @@ logs/
 # Test / temp
 account_test.json
 tests/
+_*.py
+debug_*.py
+test_*.py

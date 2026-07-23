@@ -11,15 +11,16 @@ bp = Blueprint('reconciliation', __name__)
 @login_required
 def api_reconciliation_list():
     try:
-        from db import get_reconciliations
-        limit = int(request.args.get('limit', 100))
+        from db import get_reconciliations, count_reconciliations
+        limit = int(request.args.get('limit', 20))
         offset = int(request.args.get('offset', 0))
         status = request.args.get('status') or None
         reconciliation_no = request.args.get('reconciliation_no') or None
         date_from = request.args.get('date_from') or None
         date_to = request.args.get('date_to') or None
         data = get_reconciliations(limit=limit, offset=offset, status=status, reconciliation_no=reconciliation_no, date_from=date_from, date_to=date_to)
-        return jsonify({'success': True, 'data': data})
+        total = count_reconciliations(status=status, reconciliation_no=reconciliation_no, date_from=date_from, date_to=date_to)
+        return jsonify({'success': True, 'data': data, 'total': total})
     except Exception as e:
         logger.error(f"查询对账列表异常: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
