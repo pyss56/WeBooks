@@ -35,6 +35,8 @@ services:
       # 管理员用户名和密码（用于登录管理后台）
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=your_admin_password
+      # 启动时是否使用 ADMIN_PASSWORD 强制重置/设置管理员密码（true/false）
+      - ADMIN_RESET_ON_START=false
       # 服务外部访问地址（预算管理页面、汇总图表链接用）
       - BASE_URL=http://your-domain:5001
       # PC端访问入口编码（企业微信自建应用主页URL拼接用）

@@ -437,14 +437,16 @@ def init_db():
     try:
         # 始终确保所有表结构存在（CREATE TABLE IF NOT EXISTS 幂等安全）
         _create_all_tables(conn)
+        conn.commit()
 
-        # 初始化默认角色、菜单、以及 schema 版本信息
+        # 初始化默认角色和菜单，确保建表后立即生成默认数据
+        init_default_roles()
+        init_menus()
+
+        # 记录 schema 版本信息
         _set_schema_version(conn, DB_VERSION)
         conn.commit()
         logger.info(f"数据库初始化完成: {DB_PATH}, 版本: {DB_VERSION}")
-
-        # 确保默认角色存在（无论是否迁移）
-        init_default_roles()
 
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
@@ -2268,9 +2270,44 @@ def sync_admin_user(config) -> bool:
     import hashlib
     admin_name = config.ADMIN_USERNAME
     admin_pwd = config.ADMIN_PASSWORD
-    if not admin_name or not admin_pwd:
-        logger.warning("ADMIN_USERNAME 或 ADMIN_PASSWORD 未配置，跳过管理员同步")
+    reset_on_start = getattr(config, 'ADMIN_RESET_ON_START', False)
+    if not admin_name:
+        logger.error("ADMIN_USERNAME 未配置，无法同步管理员用户")
         return False
+    if not admin_pwd:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "SELECT id, is_admin FROM \"user\" WHERE (name=? OR code=?) AND deleted_at IS NULL LIMIT 1",
+                (admin_name, admin_name))
+            existing = cur.fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE \"user\" SET is_admin=1, updated_at=datetime('now','localtime') WHERE id=?",
+                    (existing['id'],))
+                conn.execute(
+                    "INSERT OR IGNORE INTO user_role (user_code, role_code, created_by) VALUES (?, 'admin', 'system')",
+                    (admin_name,))
+                conn.commit()
+                logger.warning(f"ADMIN_PASSWORD 未配置，已保留现有管理员 '{admin_name}'，但未创建新账号")
+                return True
+
+            # 如果已有其他管理员账号，则直接跳过创建
+            cur = conn.execute(
+                "SELECT id, name, code FROM \"user\" WHERE is_admin=1 AND deleted_at IS NULL LIMIT 1")
+            other_admin = cur.fetchone()
+            if other_admin:
+                logger.info(f"检测到已有管理员账号 '{other_admin['name']}'，跳过 ADMIN_PASSWORD 配置")
+                return True
+
+            logger.error("ADMIN_PASSWORD 未配置，且未检测到任何管理员账号，请配置 ADMIN_PASSWORD")
+            return False
+        except Exception as e:
+            logger.error(f"同步管理员用户失败: {e}")
+            return False
+        finally:
+            conn.close()
+
     conn = get_connection()
     try:
         # 检查是否已存在该用户
@@ -2280,12 +2317,19 @@ def sync_admin_user(config) -> bool:
         existing = cur.fetchone()
         password_hash = hashlib.sha256(admin_pwd.encode('utf-8')).hexdigest()
         if existing:
-            # 已有账号，只确保 is_admin 标识，不覆盖密码
-            conn.execute(
-                "UPDATE \"user\" SET is_admin=1, updated_at=datetime('now','localtime') WHERE id=?",
-                (existing['id'],))
-            logger.info(f"管理员用户 '{admin_name}' 已存在，更新管理员标识（保留原有密码）")
+            # 已有账号：如果配置了重置标识则更新密码，否则仅确保 is_admin 标识
+            if reset_on_start:
+                conn.execute(
+                    "UPDATE \"user\" SET password_hash=?, is_admin=1, updated_at=datetime('now','localtime') WHERE id=?",
+                    (password_hash, existing['id']))
+                logger.info(f"管理员用户 '{admin_name}' 已存在，密码已根据环境变量重置")
+            else:
+                conn.execute(
+                    "UPDATE \"user\" SET is_admin=1, updated_at=datetime('now','localtime') WHERE id=?",
+                    (existing['id'],))
+                logger.info(f"管理员用户 '{admin_name}' 已存在，更新管理员标识（保留原有密码）")
         else:
+            # 未存在，直接创建（创建时使用环境密码）
             conn.execute(
                 "INSERT INTO \"user\" (name, code, password_hash, is_admin, created_by) VALUES (?, ?, ?, 1, 'system')",
                 (admin_name, admin_name, password_hash))

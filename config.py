@@ -34,6 +34,8 @@ class Config:
     # 管理员用户名和密码（用于登录管理后台）
     ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
+    # 是否在启动时使用环境变量中的 ADMIN_PASSWORD 强制重置/设置管理员密码
+    ADMIN_RESET_ON_START = os.getenv('ADMIN_RESET_ON_START', 'false').strip().lower() in ('true', '1', 'yes')
 
     # 服务外部访问地址（用于生成菜单链接等）
     BASE_URL = os.getenv('BASE_URL', '').rstrip('/')
