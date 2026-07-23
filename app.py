@@ -437,7 +437,7 @@ if __name__ == '__main__':
     logger.info("账本: 本地SQLite")
     logger.info("=" * 50)
 
-    # 初始化数据库
+    # 初始化数据库（含默认角色和菜单）
     from db import init_db
     init_db()
 
@@ -445,9 +445,8 @@ if __name__ == '__main__':
     _seed_data()
 
     # 从环境变量同步管理员到数据库
-    from db import sync_admin_user, init_menus
+    from db import sync_admin_user
     sync_admin_user(config)
-    init_menus()
 
     # 消息平台初始化
     if config.WECOM_CORP_ID and config.WECOM_CORP_SECRET:
