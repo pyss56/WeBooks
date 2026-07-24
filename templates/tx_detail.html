@@ -241,7 +241,7 @@ function showEdit() {
             catSel.innerHTML += '<option value="' + c.id + '"' + s + '>' + c.name.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</option>';
           });
         }
-      }).catch(function(e) { console.error('加载科目失败', e); });
+      }).catch(function() {});
   }
   // 加载账户（选中当前值）
   var curAcctId = (_currentTx && (_currentTx.account_id || '')) || null;

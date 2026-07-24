@@ -318,13 +318,13 @@ def manifest_json():
         "orientation": "portrait",
         "icons": [
             {
-                "src": "/static/icon-192.png",
+                "src": "/static/logo.png",
                 "sizes": "192x192",
                 "type": "image/png",
                 "purpose": "any maskable"
             },
             {
-                "src": "/static/icon-512.png",
+                "src": "/static/logo.png",
                 "sizes": "512x512",
                 "type": "image/png",
                 "purpose": "any maskable"
@@ -437,7 +437,7 @@ if __name__ == '__main__':
     logger.info("账本: 本地SQLite")
     logger.info("=" * 50)
 
-    # 初始化数据库（含默认角色和菜单）
+    # 初始化数据库
     from db import init_db
     init_db()
 

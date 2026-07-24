@@ -9,8 +9,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="{{ app_name }}">
     <link rel="manifest" href="/manifest.json">
-    <link rel="icon" type="image/png" href="/static/icon-192.png">
-    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/logo.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/logo.png">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/logo.png">
     <title>{% block title %}后台管理{% endblock %} - {{ app_name }}</title>
     <link rel="stylesheet" href="https://maxst.icons8.com/vue-static/landings/line-awesome/line-awesome/1.3.0/css/line-awesome.min.css">
     <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/line-awesome/1.3.0/line-awesome/css/line-awesome.min.css" onerror="this.remove()">
@@ -574,49 +577,50 @@
 
     <!-- PWA Service Worker 注册 & 安装按钮 -->
     <script>
-    // ---------- PWA: 延迟安装提示 ----------
+    // ---------- PWA: 安装按钮与提示 ----------
     var deferredPrompt = null;
+    function showInstallControls() {
+        var btn = document.getElementById('installPwaBtn');
+        var sep = document.getElementById('installSep');
+        var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        if (btn) btn.style.display = isStandalone ? 'none' : '';
+        if (sep) sep.style.display = isStandalone ? 'none' : '';
+    }
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
-            navigator.serviceWorker.register('/sw.js').then(function(reg) {
-                console.log('[PWA] SW 注册成功，作用域:', reg.scope);
-            }).catch(function(err) {
-                console.warn('[PWA] SW 注册失败:', err);
-            });
+            navigator.serviceWorker.register('/sw.js').catch(function() {});
+            showInstallControls();
         });
+    } else {
+        showInstallControls();
     }
     window.addEventListener('beforeinstallprompt', function(e) {
         // 阻止 Chrome 自动弹出安装栏，由我们自定义按钮触发
         e.preventDefault();
         deferredPrompt = e;
-        // 显示安装按钮
-        var btn = document.getElementById('installPwaBtn');
-        var sep = document.getElementById('installSep');
-        if (btn) btn.style.display = '';
-        if (sep) sep.style.display = '';
-        console.log('[PWA] 已捕获 beforeinstallprompt，安装按钮已显示');
+        showInstallControls();
     });
     window.addEventListener('appinstalled', function() {
-        // 安装成功后隐藏按钮
         deferredPrompt = null;
         var btn = document.getElementById('installPwaBtn');
         var sep = document.getElementById('installSep');
         if (btn) btn.style.display = 'none';
         if (sep) sep.style.display = 'none';
-        console.log('[PWA] 应用已安装');
     });
     function installPWA() {
         if (!deferredPrompt) {
-            alert('安装提示暂不可用，请尝试在浏览器菜单中手动安装');
+            if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+                return;
+            }
+            if (typeof showToast === 'function') {
+                showToast('安装提示暂不可用，请在浏览器菜单中选择“安装应用”或“添加到主屏幕”', 'info');
+            } else {
+                alert('安装提示暂不可用，请尝试在浏览器菜单中手动安装');
+            }
             return;
         }
         deferredPrompt.prompt();
         deferredPrompt.userChoice.then(function(choiceResult) {
-            if (choiceResult.outcome === 'accepted') {
-                console.log('[PWA] 用户已接受安装');
-            } else {
-                console.log('[PWA] 用户已取消安装');
-            }
             deferredPrompt = null;
             var btn = document.getElementById('installPwaBtn');
             var sep = document.getElementById('installSep');

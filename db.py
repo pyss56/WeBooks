@@ -441,7 +441,7 @@ def init_db():
 
         # 初始化默认角色和菜单，确保建表后立即生成默认数据
         init_default_roles()
-        init_menus()
+        init_menus(force=False)
 
         # 记录 schema 版本信息
         _set_schema_version(conn, DB_VERSION)
@@ -2382,7 +2382,7 @@ DEFAULT_MENUS = [
     ('page', 22, '📂', '科目管理', '/categories', 1),
     ('page', 22, '📊', '预算管理', '/budgets', 2),
     ('page', 22, '💳', '账户设置', '/accounts', 3),
-    # 记账管理 (dir) - 默认折叠
+    # 记账管理 (dir) - 默认展开
     ('dir', 0, '📒', '记账管理', None, 4),
     ('page', 26, '✏️', '页面记账', '/add-transaction', 1),
     ('page', 26, '💰', '交易查询', '/transaction', 2),
@@ -2398,37 +2398,24 @@ DEFAULT_MENUS = [
 ]
 
 
-def _is_menu_table_incomplete(conn) -> bool:
-    """判断 menu 表是否缺少默认菜单（如仅剩记账设置）。"""
-    cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
-    count = cur.fetchone()['cnt']
-    if count == 0:
-        return False
-    # 如果默认目录缺失，则认为初始化不完整
-    required_roots = {'首页', '系统管理', '记账设置', '记账管理'}
-    rows = conn.execute("SELECT label FROM menu WHERE parent_id=0 AND type='dir'").fetchall()
-    root_labels = {r['label'] for r in rows}
-    if not required_roots.issubset(root_labels):
-        return True
-    # 如果菜单数量非常少，也认为不完整
-    if count < 8:
-        return True
-    return False
-
-
-def init_menus():
-    """初始化默认菜单（仅当表为空时写入）并绑定到 admin 角色"""
+def init_menus(force: bool = False):
+    """初始化默认菜单，并只在首次建表/空表时补入默认数据。"""
     conn = get_connection()
     try:
         cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
-        if cur.fetchone()['cnt'] > 0:
-            if _is_menu_table_incomplete(conn):
-                logger.warning("menu 表数据不完整，重新初始化默认菜单")
-                conn.execute("DELETE FROM role_menu")
-                conn.execute("DELETE FROM menu")
-                conn.commit()
-            else:
-                return
+        menu_count = cur.fetchone()['cnt']
+        if not force and menu_count > 0:
+            return
+
+        if menu_count > 0 and force:
+            logger.info("检测到已有菜单数据，跳过重新初始化")
+            return
+
+        if menu_count == 0:
+            logger.info("menu 表为空，初始化默认菜单")
+        else:
+            logger.info("按初始化流程补齐默认菜单")
+
         menu_ids = []
         for idx, (typ, parent_ref, icon, label, url, sort_order) in enumerate(DEFAULT_MENUS):
             pid = 0
@@ -2440,7 +2427,7 @@ def init_menus():
             conn.execute(
                 "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'system')",
                 (pid, typ, label, icon, url, sort_order,
-                 0 if label in ('系统管理','记账管理','记账设置') else (1 if typ == 'dir' else 0)))
+                 1 if label == '记账管理' else (0 if label in ('系统管理','记账设置') else (1 if typ == 'dir' else 0))))
             mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             menu_ids.append(mid)
         conn.commit()

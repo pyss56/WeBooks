@@ -16,8 +16,7 @@ const CACHE = {
 
 const STATIC_URLS = [
   '/manifest.json',
-  '/static/icon-192.png',
-  '/static/icon-512.png',
+  '/static/logo.png',
 ];
 
 const CDN_URLS = [
