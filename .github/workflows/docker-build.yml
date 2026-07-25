@@ -53,6 +53,6 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}${{ github.ref_name == 'beta' && '-beta' || '' }}
+            VERSION=${{ steps.version.outputs.version }}
             BUILD_TIME=${{ github.event.repository.updated_at }}
             COMMIT_SHA=${{ github.sha }}
