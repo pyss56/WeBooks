@@ -2,7 +2,7 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, beta ]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -19,16 +19,22 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          # 从 version.py 中读取版本号
           VERSION=$(python3 -c "from version import __version__; print(__version__)")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-          # 如果是 git tag 推送，使用 tag 作为版本
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAG_VERSION=${GITHUB_REF#refs/tags/v}
-            echo "version=$TAG_VERSION" >> $GITHUB_OUTPUT
-            echo "VERSION=$TAG_VERSION" >> $GITHUB_ENV
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_ENV
+
+      - name: Set tags
+        id: tags
+        run: |
+          BASE="${{ env.DOCKER_IMAGE }}"
+          VER="${{ steps.version.outputs.version }}"
+          if [[ "${{ github.ref_name }}" == "beta" ]]; then
+            echo "tags=${BASE}:${VER}-beta,${BASE}:beta" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${BASE}:${VER},${BASE}:latest" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up Docker Buildx
@@ -45,10 +51,8 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.DOCKER_IMAGE }}:latest
+          tags: ${{ steps.tags.outputs.tags }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ steps.version.outputs.version }}${{ github.ref_name == 'beta' && '-beta' || '' }}
             BUILD_TIME=${{ github.event.repository.updated_at }}
             COMMIT_SHA=${{ github.sha }}
