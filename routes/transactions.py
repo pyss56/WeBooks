@@ -403,14 +403,17 @@ def api_transactions_by_uuid_alias_save():
         return jsonify({'success': False, 'message': '参数不完整'}), 400
     try:
         from db import add_input_alias, get_connection
-        # 获取 target_id
         target_id = ''
         conn = get_connection()
         try:
             if target_type == 'category':
                 row = conn.execute("SELECT id FROM categories WHERE name=?", (new_value,)).fetchone()
             else:
-                row = conn.execute("SELECT id FROM account WHERE name=?", (new_value,)).fetchone()
+                row = conn.execute("SELECT id FROM accounts WHERE name=?", (new_value,)).fetchone()
+                if not row:
+                    m = __import__('re').match(r'(.+?)\s*\(', new_value)
+                    if m:
+                        row = conn.execute("SELECT id FROM accounts WHERE name=?", (m.group(1).strip(),)).fetchone()
             if row:
                 target_id = str(row['id'])
         finally:
@@ -419,6 +422,9 @@ def api_transactions_by_uuid_alias_save():
         if ok:
             return jsonify({'success': True, 'message': f'已保存：{hint} → {new_value}'})
         return jsonify({'success': False, 'message': '保存失败'}), 500
+    except Exception as e:
+        logger.error(f"保存alias建议异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
     except Exception as e:
         logger.error(f"保存alias建议异常: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500

@@ -94,9 +94,12 @@ class MessageHandler:
             if actions and content in actions:
                 return self._handle_action_input(content, from_user)
 
-        # 通用选择模式（科目/账户/其他候选项）
+        # 通用选择模式（科目/账户/其他候选项）—— 只有数字回复才拦截
         if self._key(from_user) in self._pending_selection_state:
-            return self._handle_selection_input(content, from_user)
+            if re.match(r'^\d{1,3}$', content):
+                return self._handle_selection_input(content, from_user)
+            # 非数字：清除状态放行到正常解析
+            self._pending_selection_state.pop(self._key(from_user), None)
 
         # 科目/账户解析选择模式
         if self._key(from_user) in self._pending_resolve:
@@ -556,7 +559,7 @@ class MessageHandler:
                 parts.append(f'账户「{account_hint}」→「{selected_name}」')
 
         # ② 保存科目别名
-        original_input = pending_data.get('category_name', '')
+        original_input = pending_data.get('_alias_original_input') or pending_data.get('original_input') or pending_data.get('category_name', '')
         if original_input and resolved_category_id:
             ok_cat = add_input_alias(
                 original_input, 'category',

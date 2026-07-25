@@ -481,6 +481,7 @@ class TransactionService:
                     'account_name': account_name,
                     'raw_message': raw_message,
                     'message_log_id': message_log_id,
+                    'original_input': category_name,
                 },
                 'message': f'未找到{type_label}类别「{category_name}」\n'
                            f'可用{type_label}类别：\n{available_text}\n'
@@ -507,6 +508,7 @@ class TransactionService:
                     'account_name': account_name,
                     'raw_message': raw_message,
                     'message_log_id': message_log_id,
+                    'original_input': category_name,
                 },
                 'message': f'「{category_name}」是顶级科目，无法直接使用。\n'
                            f'请从以下{type_label}类别中选择：\n{available_text}\n'
@@ -791,8 +793,8 @@ class TransactionService:
             # 把已解决的科目信息带到账户选择阶段
             new_pending = dict(pending)
             new_pending['category_id'] = category['id']
-            new_pending['category_name'] = category['name']
             new_pending['resolved_category_name'] = resolved_name
+            new_pending['_alias_original_input'] = pending.get('_alias_original_input') or pending.get('original_input') or pending.get('category_name', '')
             return {
                 'success': False,
                 'needs_resolve': True,
