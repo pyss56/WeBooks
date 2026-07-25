@@ -21,27 +21,39 @@ class WeComMessageHandler(MessageHandler):
 
     def handle_text_message(self, content: str, from_user: str,
                             message_log_id: int = None) -> str:
-        """重写：记账成功后只发文本卡片，免文本回复"""
+        """重写：根据基类标记的回复模式分流，卡片与文本分离。"""
         msg = super().handle_text_message(content, from_user, message_log_id)
-        if '✅ 记账成功' in msg:
-            import re as _re
-            last = self._last_transaction.get(self._key(from_user))
-            if last and last.get('uuid'):
-                from config import get_config
-                cfg = get_config()
-                view_url = f"{cfg.BASE_URL}/tx/{last['uuid']}".replace('//', '/') if cfg.BASE_URL else ''
-                if view_url:
-                    # 去掉描述中与标题重复的"✅ 记账成功！"
-                    brief = msg.replace('✅ 记账成功！\n', '').replace('✅ 记账成功！', '')
-                    self.wecom_client.send_text_card(
-                        title='✅ 记账成功',
-                        description=brief.replace('\n', '<br>'),
-                        url=view_url,
-                        btntxt="查看",
-                        to_user=from_user,
-                    )
-            return ''  # 文本卡片已发送，不再回复文本
+        key = self._key(from_user)
+        mode = self._reply_mode.pop(key, 'text')
+        data = self._reply_data.pop(key, {})
+
+        if mode in ('card', 'composite'):
+            card_content = data.get('card_content') or msg
+            card_title = data.get('card_title', '✅ 记账成功')
+            self._send_booking_card(card_content, card_title, from_user)
+            if mode == 'composite':
+                # composite 模式：卡片已发，返回的是纯别名确认提示
+                return msg
+            # card 模式：不发文本
+            return ''
+
         return msg
+
+    def _send_booking_card(self, booking_msg: str, title: str, from_user: str):
+        """发送记账成功卡片（含完整记账信息 + 编辑链接按钮）。"""
+        last = self._last_transaction.get(self._key(from_user))
+        if last and last.get('uuid'):
+            from config import get_config
+            cfg = get_config()
+            view_url = f"{cfg.BASE_URL}/tx/{last['uuid']}".replace('//', '/') if cfg.BASE_URL else ''
+            brief = booking_msg.replace('✅ 记账成功！\n', '').replace('✅ 记账成功！', '')
+            self.wecom_client.send_text_card(
+                title=title,
+                description=brief.replace('\n', '<br>'),
+                url=view_url,
+                btntxt="查看详情",
+                to_user=from_user,
+            )
 
     # ── 平台特有命令 ──────────────────────────────
 

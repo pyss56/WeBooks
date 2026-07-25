@@ -87,6 +87,15 @@ body {
   from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+.alias-suggest { margin: 12px 0 0; padding: 12px 14px; background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px; font-size: 13px; display: none; }
+.alias-suggest.active { display: block; }
+.alias-suggest .title { font-weight: 600; margin-bottom: 6px; color: #e65100; }
+.alias-suggest .item { padding: 4px 0; color: #555; }
+.alias-suggest .item .key { color: #333; font-weight: 500; }
+.alias-suggest .btn-row { margin-top: 8px; display: flex; gap: 6px; }
+.alias-suggest .btn-apply { padding: 4px 12px; font-size: 12px; border-radius: 4px; border: 1px solid #e65100; background: #fff; color: #e65100; cursor: pointer; }
+.alias-suggest .btn-apply:hover { background: #e65100; color: #fff; }
+.alias-suggest .btn-apply.saved { border-color: #07c160; color: #07c160; background: #f0faf4; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -205,6 +214,7 @@ function renderTx(tx) {
             <input type="text" id="editTime" value="${tx.transaction_time || ''}" placeholder="YYYY-MM-DD HH:MM:SS">
         </div>
         <div id="editError" style="display:none;background:#fce4ec;color:#c62828;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;"></div>
+        <div id="aliasSuggest" class="alias-suggest"></div>
         <div style="display:flex;gap:8px;">
             <button class="btn btn-sm" style="flex:1;" id="saveBtn" onclick="saveEdit()">💾 保存</button>
             <button class="btn btn-danger btn-sm" id="deleteBtn" onclick="confirmDelete()" style="margin-top:0;">🗑️ 删除</button>
@@ -319,6 +329,11 @@ async function saveEdit() {
     var result = await resp.json();
     if (result.success) {
       showToast('✅ ' + result.message, 'success');
+      // 如果有 alias 建议，展示在编辑面板中
+      if (result.alias_suggestions && result.alias_suggestions.length > 0) {
+        showAliasSuggestions(result.alias_suggestions);
+        return; // 不刷新，让用户看到建议
+      }
       setTimeout(function() { location.reload(); }, 1000);
     } else {
       showToast('❌ ' + result.message, 'error');
@@ -352,6 +367,53 @@ function confirmDelete() {
       showToast('❌ 删除失败', 'error');
       btn.disabled = false; btn.textContent = '🗑️ 删除';
     });
+}
+
+function showAliasSuggestions(suggestions) {
+  _pendingSuggestions = suggestions;
+  var box = $('aliasSuggest');
+  var lines = suggestions.map(function(s, i) {
+    var typeLabel = s.type === 'category' ? '科目' : '账户';
+    return '<div class="item">'
+      + '🔍 <span class="key">' + s.hint.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>'
+      + ' → ' + typeLabel + '「' + s.old_value.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '」→「' + s.new_value.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '」'
+      + ' <button class="btn-apply" data-idx="' + i + '" onclick="applyAliasSuggestion(' + i + ')">更新映射</button></div>';
+  });
+  box.innerHTML = '<div class="title">💡 检测到映射可优化 — 下次同样通知将自动使用新值</div>' + lines.join('');
+  box.classList.add('active');
+}
+
+async function applyAliasSuggestion(idx) {
+  var box = $('aliasSuggest');
+  var btns = box.querySelectorAll('.btn-apply');
+  if (!btns[idx]) return;
+  var btn = btns[idx];
+  btn.textContent = '保存中...';
+  btn.disabled = true;
+  // 从 innerHTML 解析 suggestion 数据（简单方式：存储全局变量）
+  if (!_pendingSuggestions) return;
+  var s = _pendingSuggestions[idx];
+  try {
+    var resp = await fetch('/api/transactions/by-uuid/alias-save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hint: s.hint, type: s.type, new_value: s.new_value}),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      btn.textContent = '✅ 已保存';
+      btn.classList.add('saved');
+      showToast('✅ ' + result.message, 'success');
+    } else {
+      btn.textContent = '❌ 失败';
+      btn.disabled = false;
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch(e) {
+    btn.textContent = '❌ 失败';
+    btn.disabled = false;
+    showToast('❌ 请求失败', 'error');
+  }
 }
 </script>
 {% endif %}

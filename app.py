@@ -134,7 +134,7 @@ def _make_log_handler(filename, level):
 
 # 主日志 - 按小时切分
 log_handler = _make_log_handler('app.log',
-    getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO))
+    getattr(logging, os.getenv('LOG_LEVEL', 'DEBUG').upper(), logging.DEBUG))
 
 # 推送异常日志
 push_log_handler = _make_log_handler('push-error.log', logging.ERROR)
@@ -142,11 +142,11 @@ push_log_handler = _make_log_handler('push-error.log', logging.ERROR)
 # 控制台日志
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
-console_handler.setLevel(getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO))
+console_handler.setLevel(getattr(logging, os.getenv('LOG_LEVEL', 'DEBUG').upper(), logging.DEBUG))
 
 # 根日志
 root_logger = logging.getLogger()
-root_logger.setLevel(getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO))
+root_logger.setLevel(getattr(logging, os.getenv('LOG_LEVEL', 'DEBUG').upper(), logging.DEBUG))
 root_logger.addHandler(log_handler)
 root_logger.addHandler(console_handler)
 
@@ -248,6 +248,7 @@ from routes.aliases import bp as bp_aliases
 from routes.summary_view import bp as bp_summary_view
 from routes.menus import bp as bp_menus
 from routes.roles import bp as bp_roles
+from routes.ts_rules import bp as bp_ts_rules
 
 app.register_blueprint(bp_transactions)
 app.register_blueprint(bp_accounts)
@@ -260,6 +261,7 @@ app.register_blueprint(bp_aliases)
 app.register_blueprint(bp_summary_view)
 app.register_blueprint(bp_menus)
 app.register_blueprint(bp_roles)
+app.register_blueprint(bp_ts_rules)
 
 # 注入 scheduler 依赖到 scheduler blueprint
 _TASK_FUNCS = {

@@ -12,7 +12,7 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 DB_PATH = os.path.join(DB_DIR, 'data.db')
 
 # ============ 数据库版本管理 ============
-DB_VERSION = 4
+DB_VERSION = 6
 
 
 def _set_schema_version(conn, version: int):
@@ -21,6 +21,82 @@ def _set_schema_version(conn, version: int):
     conn.execute("DELETE FROM schema_version")
     conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
 
+
+def _get_schema_version(conn) -> int:
+    """读取当前数据库 schema 版本号。"""
+    try:
+        row = conn.execute("SELECT version FROM schema_version").fetchone()
+        return row['version'] if row else 0
+    except Exception:
+        return 0
+
+
+def _run_migrations(conn):
+    """按版本顺序执行数据库迁移。"""
+    current = _get_schema_version(conn)
+
+    if current < 6:
+        logger.info("数据库迁移: v6 — ts_parse_rule.config 列 + 菜单项")
+        try:
+            conn.execute("ALTER TABLE ts_parse_rule ADD COLUMN config TEXT DEFAULT NULL")
+            logger.info("  ts_parse_rule.config 列添加完成")
+        except Exception:
+            pass
+        try:
+            row = conn.execute("SELECT id FROM menu WHERE label='记账设置' AND type='dir'").fetchone()
+            if row:
+                pid = row['id']
+                for icon, label, url, sort_order in [
+                    ('🔍', '解析配置', '/ts/rules', 4),
+                ]:
+                    existing = conn.execute("SELECT id FROM menu WHERE label=? AND type='page' AND parent_id=?", (label, pid)).fetchone()
+                    if existing:
+                        continue
+                    conn.execute(
+                        "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, created_by) VALUES (?, 'page', ?, ?, ?, ?, 'system')",
+                        (pid, label, icon, url, sort_order))
+                    mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    conn.execute("INSERT OR IGNORE INTO role_menu (role_code, menu_id, created_by) VALUES ('admin', ?, 'system')", (mid,))
+                conn.commit()
+                logger.info("  菜单迁移完成")
+        except Exception as e:
+            logger.error(f"  v6 菜单迁移失败: {e}")
+
+        # 去重：删除重复的解析规则（保留 id 最小的）
+        try:
+            conn.execute("""
+                DELETE FROM ts_parse_rule WHERE id NOT IN (
+                    SELECT MIN(id) FROM ts_parse_rule GROUP BY field_type, regex_pattern
+                )
+            """)
+            conn.commit()
+            logger.info("  ts_parse_rule 去重完成")
+            # 添加唯一约束（SQLite 不直接 ADD CONSTRAINT，用 CREATE UNIQUE INDEX）
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ts_rule_unique ON ts_parse_rule(field_type, regex_pattern)")
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"  ts_parse_rule 去重/索引: {e}")
+
+        # 初始化 field_type 字典（已有库也会执行 _init_dict_defaults，但先在这里种子确保）
+        try:
+            conn.execute("INSERT OR IGNORE INTO dict_header (code, name) VALUES ('field_type', '解析字段类型')")
+            row = conn.execute("SELECT id FROM dict_header WHERE code='field_type'").fetchone()
+            if row:
+                hid = row['id']
+                for code, value, order in [('time','交易时间',1),('amount','交易金额',2),('merchant','商家',3),('account','账户',4),('direction','交易方向',5)]:
+                    conn.execute("INSERT OR IGNORE INTO dict_detail (header_id, code, value, sort_order) VALUES (?, ?, ?, ?)", (hid, code, value, order))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"  v6 字典迁移失败: {e}")
+
+        # 删除已废弃的"关键词配置"菜单
+        try:
+            conn.execute("DELETE FROM role_menu WHERE menu_id IN (SELECT id FROM menu WHERE label='关键词配置')")
+            conn.execute("DELETE FROM menu WHERE label='关键词配置'")
+            conn.commit()
+            logger.info("  已删除废弃的关键词配置菜单")
+        except Exception:
+            pass
 
 
 def _create_all_tables(conn):
@@ -235,6 +311,40 @@ def _create_all_tables(conn):
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS ts_parse_rule (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            field_type      TEXT NOT NULL,
+            regex_pattern   TEXT NOT NULL,
+            priority        INTEGER NOT NULL DEFAULT 1,
+            demo_text       TEXT DEFAULT NULL,
+            enabled         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT DEFAULT NULL,
+            config          TEXT DEFAULT NULL,
+            created_by      TEXT DEFAULT NULL,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            updated_by      TEXT DEFAULT NULL,
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(field_type, regex_pattern)
+        )
+    """)
+    # 初始化默认解析规则（每个字段类型一条）
+    _rule_seeds = [
+        ('time',     r'(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2})\s*[:时点]\s*(\d{1,2})', 1,
+         '07月25日04:05'),
+        ('amount',   r'交易金额[:：]\s*([+-]?\d+(?:\.\d{1,2})?)\s*元?', 1,
+         '交易金额：10.00元'),
+        ('merchant', r'交易类型[:：]\s*(.+)', 1,
+         '交易类型：尾号5522信用卡人民币消费'),
+        ('account',  r'尾号\s*(\d{4})\s*的\s*(.+?)(?=\d{2}\s*月|在|消费|退款|$)', 1,
+         '尾号5522的龙卡信用卡07月25日'),
+        ('direction', r'(消费|支出|付款|退款|退货|收入|到账)', 1, '消费'),
+    ]
+    for ft, pat, pri, demo in _rule_seeds:
+        conn.execute("INSERT OR IGNORE INTO ts_parse_rule (field_type, regex_pattern, priority, demo_text) VALUES (?, ?, ?, ?)",
+                     (ft, pat, pri, demo))
+    conn.commit()
+
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS "user" (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             name            TEXT NOT NULL,
@@ -358,6 +468,31 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+# ============ 通知解析管理 ============
+
+SUPPORTED_FIELD_TYPES = ('time', 'amount', 'merchant', 'account', 'direction')
+
+
+def get_ts_parse_rules(text: str = None) -> list:
+    """获取所有启用的解析规则，按优先级排序。返回 [{field_type, regex_pattern, priority, demo_text, config}, ...]"""
+    conn = get_connection()
+    try:
+        sql = "SELECT * FROM ts_parse_rule WHERE enabled=1 ORDER BY priority, id"
+        rows = conn.execute(sql).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def load_notice_parse_templates(text: str) -> list:
+    """根据通知文本加载匹配的解析规则。返回 [{field_type, regex_pattern, priority, demo_text}, ...]"""
+    if not text:
+        return []
+    return get_ts_parse_rules(text)
+
+
 def _init_dict_defaults(conn):
     """初始化字典头表和明细表"""
     groups = [
@@ -385,6 +520,13 @@ def _init_dict_defaults(conn):
         ('sys_config', '系统配置', [
             ('summary_expire_days', '7', 1),
             ('tx_expire_minutes', '5', 2),
+        ]),
+        ('field_type', '解析字段类型', [
+            ('time', '交易时间', 1),
+            ('amount', '交易金额', 2),
+            ('merchant', '商家', 3),
+            ('account', '账户', 4),
+            ('direction', '交易方向', 5),
         ]),
     ]
     for hcode, hname, items in groups:
@@ -438,6 +580,9 @@ def init_db():
         # 始终确保所有表结构存在（CREATE TABLE IF NOT EXISTS 幂等安全）
         _create_all_tables(conn)
         conn.commit()
+
+        # 按版本顺序执行迁移
+        _run_migrations(conn)
 
         # 初始化默认角色和菜单，确保建表后立即生成默认数据
         init_default_roles()
@@ -2382,6 +2527,7 @@ DEFAULT_MENUS = [
     ('page', 22, '📂', '科目管理', '/categories', 1),
     ('page', 22, '📊', '预算管理', '/budgets', 2),
     ('page', 22, '💳', '账户设置', '/accounts', 3),
+    ('page', 22, '🔍', '解析配置', '/ts/rules', 4),
     # 记账管理 (dir) - 默认展开
     ('dir', 0, '📒', '记账管理', None, 4),
     ('page', 26, '✏️', '页面记账', '/add-transaction', 1),

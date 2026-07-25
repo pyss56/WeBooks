@@ -173,9 +173,9 @@ def qywx_callback():
         # 解密消息
         decrypted_xml = crypt.decrypt(encrypted)
         msg_data = parse_xml(decrypted_xml)
-        logger.info(f"🔓 解密后XML:\n{decrypted_xml}")
+        logger.debug(f"🔓 解密后XML:\n{decrypted_xml}")
 
-        logger.info(f"📩 收到消息: type={msg_data.get('MsgType')} "
+        logger.debug(f"📩 收到消息: type={msg_data.get('MsgType')} "
                      f"event={msg_data.get('Event','')} from={msg_data.get('FromUserName')}")
 
         logger.debug(f"--- MSG DATA START ---")
@@ -193,7 +193,7 @@ def qywx_callback():
             from_user = msg_data.get('ToUserName', '')
             reply_xml = build_reply_xml(to_user, from_user, reply_content,
                                         nonce, timestamp)
-            logger.info(f"🔒 加密前XML:\n{reply_xml}")
+            logger.debug(f"🔒 加密前XML:\n{reply_xml}")
 
             # 加密回复
             encrypted_reply = crypt.encrypt(reply_xml)
@@ -201,10 +201,10 @@ def qywx_callback():
             encrypted_reply_xml = build_encrypted_reply_xml(
                 encrypted_reply, reply_signature, timestamp, nonce
             )
-            logger.info(f"[回调] ✅ 处理完成 耗时={_time.time()-_t0:.3f}s 回复长度={len(reply_content)}")
+            logger.debug(f"[回调] ✅ 处理完成 耗时={_time.time()-_t0:.3f}s 回复长度={len(reply_content)}")
             return encrypted_reply_xml, 200, {'Content-Type': 'application/xml'}
         else:
-            logger.info(f"[回调] ✅ 处理完成 耗时={_time.time()-_t0:.3f}s 无回复")
+            logger.debug(f"[回调] ✅ 处理完成 耗时={_time.time()-_t0:.3f}s 无回复")
             return '', 200
 
     except Exception as e:

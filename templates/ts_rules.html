@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}解析配置{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:1200px;margin:20px auto;padding:0 16px;">
+<style>
+.section h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.form-row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 10px; }
+.form-row label { min-width: 70px; font-size: 13px; color: #666; padding-top: 8px; }
+.form-row input, .form-row select, .form-row textarea { flex: 1; min-width: 120px; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 13px; }
+.form-row textarea { min-height: 60px; font-family: monospace; }
+.form-row .btn { padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; }
+.btn-primary { background: #07c160; color: #fff; }
+.btn-primary:hover { background: #06ad56; }
+.btn-outline { background: #fff; border: 1px solid #d9d9d9 !important; color: #333; }
+.btn-outline:hover { border-color: #07c160 !important; color: #07c160; }
+.btn-danger { background: #e4393c; color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+th { background: #fafafa; font-weight: 500; color: #888; }
+tr:hover td { background: #f8fff9; }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; background: #e8f5e9; color: #2e7d32; margin: 2px; }
+.badge-off { background: #fce4ec; color: #c62828; }
+.tab-bar { display: flex; gap: 0; margin-bottom: 16px; }
+.tab-bar a { padding: 8px 20px; border: 1px solid #d9d9d9; border-radius: 6px 6px 0 0; text-decoration: none; color: #666; font-size: 13px; background: #fafafa; }
+.tab-bar a.active { background: #fff; border-bottom-color: #fff; color: #07c160; font-weight: 500; }
+#testResult { margin-top: 10px; }
+.result-item { padding: 6px 10px; margin: 4px 0; border-radius: 4px; font-size: 13px; }
+.result-item.ok { background: #e8f5e9; }
+.result-item.fail { background: #fce4ec; }
+.result-item .ft { font-weight: 500; }
+</style>
+
+<div class="tab-bar">
+    <a href="/ts/rules" class="active">🔍 解析规则</a>
+  </div>
+
+  <div class="section">
+    <h2>🧪 测试正则解析</h2>
+    <div class="form-row">
+      <textarea id="testText" placeholder="粘贴一条完整的通知文本，如：&#10;【建设银行】您尾号5522的龙卡信用卡07月25日04:05在财付通-杭州深度…消费10.00元" rows="3"></textarea>
+    </div>
+    <div class="form-row">
+      <button class="btn btn-primary" onclick="testParse()">🔍 测试解析</button>
+    </div>
+    <div id="testResult"></div>
+  </div>
+
+  <div class="section">
+    <h2>📋 解析规则列表</h2>
+    <table>
+      <thead><tr>
+        <th>ID</th><th>字段</th><th>正则表达式</th><th>优先级</th><th>演示文本</th><th>默认配置</th><th>状态</th><th>操作</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rules %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td><span class="badge">{{ field_type_names.get(r.field_type, r.field_type) }}</span></td>
+          <td><code style="font-size:11px;word-break:break-all;">{{ r.regex_pattern }}</code></td>
+          <td>{{ r.priority }}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.demo_text or '' }}">{{ r.demo_text or '' }}</td>
+          <td>
+            {% if r.config and r.config.default_category %}
+            <span class="badge">科目:{{ r.config.default_category }}</span>
+            {% endif %}
+          </td>
+          <td>{{ '✅' if r.enabled else '⛔' }}</td>
+          <td>
+            <button class="btn btn-sm btn-outline" onclick="editRule({{ r.id }})">✏️</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteRule({{ r.id }})">🗑️</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary btn-sm" onclick="editRule(null)">➕ 新建规则</button>
+    </div>
+  </div>
+</div>
+
+<div id="ruleModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;">
+    <h3 id="modalTitle" style="margin-bottom:16px;">✏️ 编辑规则</h3>
+    <input type="hidden" id="editId">
+    <div class="form-row"><label>字段类型</label><select id="editFieldType"><option value="time">time - 时间</option><option value="amount">amount - 金额</option><option value="merchant">merchant - 商家</option><option value="account">account - 账户</option><option value="direction">direction - 方向</option></select></div>
+    <div class="form-row"><label>正则表达式</label><textarea id="editPattern" rows="2" placeholder="r'你的正则表达式'"></textarea></div>
+    <div class="form-row"><label>优先级</label><input type="number" id="editPriority" value="5" min="1" max="99"></div>
+    <div class="form-row"><label>演示文本</label><input id="editDemo" placeholder="匹配的原文片段，帮助识别"></div>
+    <div class="form-row"><label>默认科目</label><input id="editDefaultCategory" placeholder="如：电子产品（可选）"></div>
+    <div class="form-row"><label>默认账户</label><input id="editDefaultAccount" placeholder="如：现金（可选）"></div>
+    <div class="form-row"><label>是否启用</label><label><input type="checkbox" id="editEnabled" checked> 启用</label></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveRule()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const _fieldTypes = ['time','amount','merchant','account','direction'];
+var fieldTypeNames = {{ field_type_names | tojson }};
+
+function $(id) { return document.getElementById(id); }
+
+async function testParse() {
+  const text = $('testText').value.trim();
+  if (!text) { showToast('请先输入通知文本', 'error'); return; }
+  // 自动调用所有启用规则解析
+  const resp = await fetch('/api/ts/rules/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text}),
+  });
+  const result = await resp.json();
+  const div = $('testResult');
+  if (!result.success) { div.innerHTML = '<div class="result-item fail">❌ ' + result.message + '</div>'; return; }
+  div.innerHTML = '<div style="font-weight:500;margin-bottom:6px;">📊 解析结果：</div>';
+  result.data.forEach(function(r) {
+    div.innerHTML += '<div class="result-item ' + (r.matched ? 'ok' : 'fail') + '">'
+      + '<span class="ft">' + (fieldTypeNames[r.field_type] || r.field_type) + '</span> → '
+      + (r.matched ? '<strong>' + r.value + '</strong>' : '<em>未匹配</em>')
+      + ' <span style="font-size:11px;color:#999;">[' + (r.rule_id || '') + '] ' + (r.demo_text || '') + '</span>'
+      + (r.error ? ' <span style="color:#c62828;">(' + r.error + ')</span>' : '')
+      + '</div>';
+  });
+}
+
+function editRule(id) {
+  $('modalTitle').textContent = id ? '✏️ 编辑规则 #' + id : '➕ 新建规则';
+  $('editId').value = id || '';
+  if (id) {
+    // 从 DOM 或 API 取数据
+    fetch('/api/ts/rules').then(r=>r.json()).then(function(result) {
+      if (!result.success) return;
+      const r = result.data.find(function(x) { return x.id === id; });
+      if (!r) return;
+      $('editFieldType').value = r.field_type;
+      $('editPattern').value = r.regex_pattern;
+      $('editPriority').value = r.priority;
+      $('editDemo').value = r.demo_text || '';
+      $('editDefaultCategory').value = (r.config && r.config.default_category) || '';
+      $('editDefaultAccount').value = (r.config && r.config.default_account) || '';
+      $('editEnabled').checked = r.enabled === 1;
+      $('ruleModal').style.display = 'flex';
+    });
+  } else {
+    $('editFieldType').value = 'time';
+    $('editPattern').value = '';
+    $('editPriority').value = '5';
+    $('editDemo').value = '';
+    $('editDefaultCategory').value = '';
+    $('editDefaultAccount').value = '';
+    $('editEnabled').checked = true;
+    $('ruleModal').style.display = 'flex';
+  }
+}
+
+function closeModal() { $('ruleModal').style.display = 'none'; }
+
+async function saveRule() {
+  const data = {
+    id: parseInt($('editId').value) || null,
+    field_type: $('editFieldType').value,
+    regex_pattern: $('editPattern').value.trim(),
+    priority: parseInt($('editPriority').value) || 5,
+    demo_text: $('editDemo').value.trim(),
+    enabled: $('editEnabled').checked,
+    config: {},
+  };
+  if ($('editDefaultCategory').value.trim()) {
+    data.config.default_category = $('editDefaultCategory').value.trim();
+  }
+  if ($('editDefaultAccount').value.trim()) {
+    data.config.default_account = $('editDefaultAccount').value.trim();
+  }
+  const resp = await fetch('/api/ts/rules', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  });
+  const result = await resp.json();
+  if (result.success) {
+    showToast('✅ 规则已保存', 'success');
+    closeModal();
+    setTimeout(function() { location.reload(); }, 500);
+  } else {
+    showToast('❌ ' + result.message, 'error');
+  }
+}
+
+async function deleteRule(id) {
+  if (!confirm('确定要删除此规则？')) return;
+  const resp = await fetch('/api/ts/rules/' + id, {method: 'DELETE'});
+  const result = await resp.json();
+  if (result.success) { location.reload(); }
+  else { showToast('❌ ' + result.message, 'error'); }
+}
+
+function showToast(msg, type) {
+  var t = document.createElement('div');
+  t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2000;padding:10px 24px;border-radius:8px;font-size:14px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);';
+  t.style.background = type === 'success' ? '#07c160' : '#e4393c';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { t.remove(); }, 2000);
+}
+</script>
+{% endblock %}

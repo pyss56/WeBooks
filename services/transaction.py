@@ -157,6 +157,100 @@ def parse_account_from_text(text: str):
     return text.strip(), None
 
 
+def parse_transaction_notice_text(text: str) -> dict:
+    """解析微信/银行类交易结果通知文本，提取金额、时间、类型和商家信息。
+    
+    正则规则从 ts_parse_rule 表加载，用户可通过 Web UI 配置。
+    """
+    cleaned = (text or '').strip()
+    if not cleaned:
+        return {'success': False, 'message': '空内容'}
+
+    result = {'success': False, 'message': '未识别到交易通知'}
+
+    # 从数据库加载匹配的解析规则
+    from db import load_notice_parse_templates
+    rules = load_notice_parse_templates(cleaned)
+
+    # 按优先级应用所有匹配规则
+    for rule in rules:
+        field_type = rule.get('field_type', '')
+        pattern = rule.get('regex_pattern', '')
+        if not pattern:
+            continue
+        match = re.search(pattern, cleaned)
+        if not match:
+            continue
+
+        if field_type == 'time' and not result.get('transaction_time'):
+            try:
+                g = match.groups()
+                if len(g) >= 4:
+                    now = datetime.now()
+                    month = int(g[0])
+                    day = int(g[1])
+                    hour = int(g[2])
+                    minute = int(g[3])
+                    dt = now.replace(year=now.year, month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
+                    result['transaction_time'] = dt
+            except (ValueError, IndexError):
+                pass
+
+        elif field_type == 'amount' and 'amount' not in result:
+            try:
+                result['amount'] = float(match.group(1))
+            except (ValueError, IndexError):
+                pass
+
+        elif field_type == 'merchant' and 'merchant' not in result:
+            try:
+                merchant = match.group(1).strip() if match.lastindex else ''
+                if merchant:
+                    result['merchant'] = merchant
+                    if re.search(r'退款|退货|退回', merchant):
+                        result['type'] = 'income'
+                    elif result.get('type') != 'income':
+                        result['type'] = 'expense'
+            except IndexError:
+                pass
+
+        elif field_type == 'account' and 'account_hint' not in result:
+            try:
+                parts = [g for g in match.groups() if g]
+                if parts:
+                    result['account_hint'] = ''.join(parts)
+            except IndexError:
+                pass
+
+        elif field_type == 'direction' and 'type' not in result:
+            kw = match.group(1).lower() if match.lastindex else match.group(0).lower()
+            if kw in ('退款', '退货', '退回', '收入', '到账'):
+                result['type'] = 'income'
+            elif kw in ('消费', '支出', '付款'):
+                result['type'] = 'expense'
+
+    # 建设银行兼容：有金额+消费关键词但没有商家，从原文提取
+    if result.get('amount') is not None and 'merchant' not in result and re.search(r'消费', cleaned):
+        result['merchant'] = cleaned.split('在', 1)[-1].split('消费', 1)[0].strip() if '在' in cleaned else cleaned.strip()
+        if 'type' not in result:
+            result['type'] = 'expense'
+
+    # 清理 merchant 中的省略号
+    if result.get('merchant'):
+        result['merchant'] = result['merchant'].rstrip('…').rstrip('...').strip()
+
+    # 可用额度（辅助字段）
+    available_match = re.search(r'可用额度[:：]\s*([+-]?\d+(?:\.\d{1,2})?)\s*元?', cleaned)
+    if available_match:
+        result['available_amount'] = float(available_match.group(1))
+
+    if result.get('amount') is not None and result.get('merchant'):
+        result['success'] = True
+        result['message'] = '已识别交易通知内容'
+
+    return result
+
+
 class TransactionService:
     """交易服务"""
 
@@ -164,11 +258,75 @@ class TransactionService:
         self.client = BookkeepingClient()
         self.source = source
 
+    def _create_transaction_with_known_category(self, category_id, amount: float, from_user: str,
+                                                user_code: str, transaction_time: Optional[datetime],
+                                                account_name: Optional[str], raw_message: Optional[str],
+                                                message_log_id: Optional[int], comment: str,
+                                                transaction_type: int) -> dict:
+        """根据已知科目直接创建交易。"""
+        from db import get_flat_accounts
+        direction = 'income' if transaction_type == 2 else 'expense'
+        account = None
+        if account_name:
+            flat_accounts = get_flat_accounts(user_code)
+            _an_lower = account_name.lower()
+            for a in flat_accounts:
+                _name = a['name']
+                _nl = _name.lower()
+                if _nl == _an_lower or _an_lower in _nl or _nl in _an_lower:
+                    account = a
+                    break
+        if not account:
+            account = self.client.get_default_account(from_user=from_user, direction=direction, source=self.source)
+        if not account:
+            flat_accounts = get_flat_accounts(user_code)
+            account = flat_accounts[0] if flat_accounts else None
+        if not account:
+            return {'success': False, 'message': '未找到可用账户，请先配置账户'}
+
+        if transaction_time is None:
+            transaction_time = datetime.now()
+
+        result = self.client.create_transaction(
+            category_id=category_id,
+            amount=amount,
+            account_id=account['id'],
+            comment=comment or '',
+            transaction_time=transaction_time,
+            transaction_type=transaction_type,
+            created_by=from_user,
+            user_code=user_code,
+            source=self.source,
+            source_user=from_user,
+            raw_message=raw_message,
+            message_log_id=message_log_id,
+        )
+
+        if result.get('success'):
+            tx_uuid = result.get('result', {}).get('uuid', '')
+            tx_code = result.get('result', {}).get('verify_code', '')
+            link = f'\n📊 编辑验证码：{tx_code}' if tx_uuid and tx_code else ''
+            time_str = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
+            return {
+                'success': True,
+                'id': result.get('result', {}).get('id', ''),
+                'uuid': tx_uuid,
+                'verify_code': tx_code,
+                'category_id': category_id,
+                'amount': amount,
+                'transaction_type': transaction_type,
+                'message': f"✅ 记账成功！\n📂 科目ID:{category_id}: ¥{amount:.2f}\n"
+                           f"💳 {account['name']}\n🕐 {time_str}\n"
+                           f"{'📝 ' + comment if comment else ''}{link}",
+            }
+        return {'success': False, 'message': f'记账失败: {result.get("errorMessage", "未知错误")}'}
+
     def parse_and_create(self, text: str, from_user: str,
                          transaction_time: Optional[datetime] = None,
                          account_name: Optional[str] = None,
                          raw_message: Optional[str] = None,
-                         message_log_id: Optional[int] = None) -> dict:
+                         message_log_id: Optional[int] = None,
+                         notice_template: Optional[dict] = None) -> dict:
         """
         解析用户文本并创建交易
         支持的格式:
@@ -191,6 +349,33 @@ class TransactionService:
         user_code = get_user_code_by_sourceuser(from_user, source=self.source)
         if not user_code:
             return {'success': False, 'message': f'⚠️ 未绑定账户（微信账号: {from_user}），请先联系管理员绑定微信账号'}
+
+        if notice_template:
+            category_name = notice_template.get('category_name') or ''
+            merchant_name = notice_template.get('merchant_name') or ''
+            merchant_category_name = notice_template.get('merchant_category_name') or ''
+            resolved_category_name = category_name or merchant_category_name or ''
+            if resolved_category_name:
+                from db import get_connection
+                conn = get_connection()
+                try:
+                    row = conn.execute("SELECT id FROM categories WHERE name=? AND (type=2 OR type=1)", (resolved_category_name,)).fetchone()
+                    category_id = row['id'] if row else None
+                finally:
+                    conn.close()
+                if category_id:
+                    return self._create_transaction_with_known_category(
+                        category_id=category_id,
+                        amount=float(notice_template.get('amount', 0) or 0),
+                        from_user=from_user,
+                        user_code=user_code,
+                        transaction_time=transaction_time,
+                        account_name=notice_template.get('account_name'),
+                        raw_message=raw_message,
+                        message_log_id=message_log_id,
+                        comment=notice_template.get('comment') or '',
+                        transaction_type=2 if notice_template.get('direction') == 'income' else 3,
+                    )
 
         # 检查是否是新增科目命令（提前处理，不需金额）
         add_match = re.match(r'^(新增(?:收入|支出)?)\s*(.+)$', text)
@@ -278,15 +463,14 @@ class TransactionService:
                 if category:
                     logger.info(f"别名解析: 「{category_name}」→ ID={alias_id} ({category.get('name')})")
         if not category:
-            available_list = self._get_available_category_list(category_type)
-            available_text = '\n'.join(f'{i+1}. {name}' for i, name in enumerate(available_list[:20]))
+            available_list, available_text = self._get_category_tree_text(category_type)
             logger.info(f"[交易解析] 科目未找到: '{category_name}', type={category_type}, 可用列表={available_list[:5]}..., 即将返回 needs_resolve")
             return {
                 'success': False,
                 'needs_resolve': True,
                 'resolve_type': 'category',
                 'original_input': category_name,
-                'available': available_list[:20],
+                'available': available_list[:30],
                 'available_text': available_text,
                 'pending_data': {
                     'text': text, 'from_user': from_user,
@@ -306,14 +490,13 @@ class TransactionService:
         # 安全检查：查到的科目是顶级/主科目时拒绝交易（不允许自动创建子科目）
         if not resolved_category_id and (category.get('parentId') == '0' or not category.get('parentId')):
             logger.warning(f"查到的科目是顶级科目，拒绝交易: {category.get('name')} (id={category.get('id')})")
-            available_list = self._get_available_category_list(category_type)
-            available_text = '\n'.join(f'{i+1}. {name}' for i, name in enumerate(available_list[:20]))
+            available_list, available_text = self._get_category_tree_text(category_type)
             return {
                 'success': False,
                 'needs_resolve': True,
                 'resolve_type': 'category',
                 'original_input': category_name,
-                'available': available_list[:20],
+                'available': available_list[:30],
                 'available_text': available_text,
                 'pending_data': {
                     'text': text, 'from_user': from_user,
@@ -425,6 +608,9 @@ class TransactionService:
         if transaction_time is None:
             transaction_time = datetime.now()
         type_label = '收入' if transaction_type == 2 else '支出'
+        logger.debug(f"[保存交易] 准备创建: category_id={category['id']}, amount={amount}, "
+                     f"account_id={account['id']}, tx_type={transaction_type}, "
+                     f"user_code={user_code}, from_user={from_user}")
         result = self.client.create_transaction(
             category_id=category['id'],
             amount=amount,
@@ -439,6 +625,9 @@ class TransactionService:
             raw_message=raw_message,
             message_log_id=message_log_id,
         )
+        logger.debug(f"[保存交易] create_transaction 返回: success={result.get('success')}, "
+                     f"id={result.get('result', {}).get('id', '')}, "
+                     f"uuid={result.get('result', {}).get('uuid', '')}")
 
         if result.get('success'):
             # 记录账单
@@ -446,7 +635,7 @@ class TransactionService:
             tx_uuid = result.get('result', {}).get('uuid', '')
 
             icon = '💵' if transaction_type == 2 else '💳'
-            time_str = transaction_time.strftime('%m-%d %H:%M')
+            time_str = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
             acct_display = f" {icon} {account['name']}"
             link = ''
             tx_code = ''
@@ -508,7 +697,7 @@ class TransactionService:
         return '\n'.join(lines[:30]) if lines else '（暂无类别）'
 
     def _get_available_category_list(self, category_type: str = 'expense') -> list:
-        """获取可用的子科目名称列表"""
+        """获取可选的子科目名称列表（仅二级/叶子科目，用于序号选择）"""
         categories = self.client.get_categories(category_type=category_type)
         result = []
         for item in categories:
@@ -519,6 +708,26 @@ class TransactionService:
             else:
                 result.append(item.get('name', ''))
         return result
+
+    def _get_category_tree_text(self, category_type: str = 'expense') -> tuple:
+        """返回 (序号列表, 层级显示文本)，一级科目作为分组标题不给序号。"""
+        categories = self.client.get_categories(category_type=category_type)
+        available = []   # 可选序号列表
+        lines = []       # 显示文本
+        for item in categories:
+            name = item.get('name', '')
+            subs = item.get('subCategories', [])
+            if subs:
+                lines.append(f'\n📂 {name}')
+                for sub in subs:
+                    idx = len(available) + 1
+                    available.append(sub.get('name', ''))
+                    lines.append(f'  {idx}. {sub["name"]}')
+            else:
+                idx = len(available) + 1
+                available.append(name)
+                lines.append(f'  {idx}. {name}')
+        return available, '\n'.join(lines).lstrip('\n')
 
     def create_from_resolved(self, pending_data: dict, resolved_value: str,
                               resolve_type: str = 'category') -> dict:
@@ -604,6 +813,8 @@ class TransactionService:
         if transaction_time is None:
             transaction_time = datetime.now()
 
+        logger.debug(f"[_finish_create_with_category] 创建交易: category_id={category['id']}, "
+                     f"account_id={account['id']}, amount={amount}, user_code={user_code}")
         result = self.client.create_transaction(
             category_id=category['id'], amount=amount, account_id=account['id'],
             comment=comment or '', transaction_time=transaction_time,
@@ -612,18 +823,17 @@ class TransactionService:
             raw_message=pending.get('raw_message'),
             message_log_id=pending.get('message_log_id'),
         )
+        logger.debug(f"[_finish_create_with_category] 结果: success={result.get('success')}, "
+                     f"id={result.get('result', {}).get('id', '')}")
 
         if result.get('success'):
             tx_uuid = result.get('result', {}).get('uuid', '')
             icon = '💵' if pending['transaction_type'] == 2 else '💳'
-            time_str = transaction_time.strftime('%m-%d %H:%M')
+            time_str = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
             link = ''
             vcode = result.get('result', {}).get('verify_code', '')
-            if tx_uuid:
-                from config import get_config
-                _c = get_config()
-                if _c.BASE_URL:
-                    link = f'\n📊 编辑验证码：{vcode}'
+            if tx_uuid and vcode:
+                link = f'\n📊 编辑验证码：{vcode}'
             return {
                 'success': True, 'id': result.get('result', {}).get('id', ''),
                 'uuid': tx_uuid, 'verify_code': vcode, 'resolved_category_name': resolved_name,
@@ -645,6 +855,8 @@ class TransactionService:
         if transaction_time is None:
             transaction_time = datetime.now()
 
+        logger.debug(f"[_finish_create_with_account] 创建交易: category_id={pending['category_id']}, "
+                     f"account_id={account['id']}, amount={amount}")
         result = self.client.create_transaction(
             category_id=pending['category_id'], amount=amount, account_id=account['id'],
             comment=comment or '', transaction_time=transaction_time,
@@ -657,14 +869,11 @@ class TransactionService:
         if result.get('success'):
             tx_uuid = result.get('result', {}).get('uuid', '')
             icon = '💵' if pending['transaction_type'] == 2 else '💳'
-            time_str = transaction_time.strftime('%m-%d %H:%M')
+            time_str = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
             link = ''
             vcode = result.get('result', {}).get('verify_code', '')
-            if tx_uuid:
-                from config import get_config
-                _c = get_config()
-                if _c.BASE_URL:
-                    link = f'\n📊 编辑验证码：{vcode}'
+            if tx_uuid and vcode:
+                link = f'\n📊 编辑验证码：{vcode}'
             # 获取实际科目名称（已由科目选择阶段确定）
             from db import get_connection
             _conn = get_connection()

@@ -292,7 +292,10 @@ def api_transactions_by_uuid_update():
 
         ok = modify_transaction(tx['id'], updated_by='uuid_link', **kwargs)
         if ok:
-            return jsonify({'success': True, 'message': '交易已更新'})
+            result = {'success': True, 'message': '交易已更新'}
+            # 如果交易来自通知解析，检测是否有可优化的 alias
+            result = _check_alias_suggestion(tx, kwargs, result)
+            return jsonify(result)
         return jsonify({'success': False, 'message': '更新失败'}), 500
     except Exception as e:
         logger.error(f"UUID更新交易异常: {e}")
@@ -330,6 +333,49 @@ def api_transactions_by_uuid_delete():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+def _check_alias_suggestion(tx: dict, kwargs: dict, result: dict) -> dict:
+    """如果交易来自通知解析且用户修改了科目/账户，提示可更新 alias 映射。"""
+    raw_msg = (tx.get('raw_message') or '').strip()
+    if not raw_msg:
+        return result
+    try:
+        from services.transaction import parse_transaction_notice_text
+        notice = parse_transaction_notice_text(raw_msg)
+    except Exception:
+        return result
+    if not notice.get('success'):
+        return result
+
+    suggestions = []
+    merchant = notice.get('merchant', '')
+    # 科目变了
+    new_cat = kwargs.get('category_name', '')
+    old_cat = (tx.get('category_name') or '').strip()
+    if merchant and new_cat and new_cat != old_cat:
+        suggestions.append({
+            'type': 'category',
+            'hint': merchant,
+            'old_value': old_cat,
+            'new_value': new_cat,
+        })
+    # 账户变了
+    account_hint = notice.get('account_hint', '')
+    new_acct = kwargs.get('account_name', '')
+    old_acct = (tx.get('account_name') or '').strip()
+    if account_hint and new_acct and new_acct != old_acct:
+        suggestions.append({
+            'type': 'account',
+            'hint': account_hint,
+            'old_value': old_acct,
+            'new_value': new_acct,
+        })
+
+    if suggestions:
+        result['alias_suggestions'] = suggestions
+        result['message'] += '。检测到通知解析的映射可能需更新'
+    return result
+
+
 def _validate_uuid(tx_uuid):
     """校验 UUID 有效性，返回 (tx, error_response)"""
     from db import get_transaction_by_uuid
@@ -344,6 +390,38 @@ def _validate_uuid(tx_uuid):
     if datetime.now() - created > timedelta(minutes=5):
         return None, (jsonify({'success': False, 'message': '链接已过期（创建超过5分钟）'}), 410)
     return tx, None
+
+
+@bp.route('/api/transactions/by-uuid/alias-save', methods=['POST'])
+def api_transactions_by_uuid_alias_save():
+    """通过 UUID 页面保存 alias 映射建议（无需登录）"""
+    data = request.get_json() or {}
+    hint = (data.get('hint') or '').strip()
+    target_type = (data.get('type') or '').strip()
+    new_value = (data.get('new_value') or '').strip()
+    if not hint or target_type not in ('category', 'account') or not new_value:
+        return jsonify({'success': False, 'message': '参数不完整'}), 400
+    try:
+        from db import add_input_alias, get_connection
+        # 获取 target_id
+        target_id = ''
+        conn = get_connection()
+        try:
+            if target_type == 'category':
+                row = conn.execute("SELECT id FROM categories WHERE name=?", (new_value,)).fetchone()
+            else:
+                row = conn.execute("SELECT id FROM account WHERE name=?", (new_value,)).fetchone()
+            if row:
+                target_id = str(row['id'])
+        finally:
+            conn.close()
+        ok = add_input_alias(hint, target_type, target_id, target_name=new_value)
+        if ok:
+            return jsonify({'success': True, 'message': f'已保存：{hint} → {new_value}'})
+        return jsonify({'success': False, 'message': '保存失败'}), 500
+    except Exception as e:
+        logger.error(f"保存alias建议异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @bp.route('/api/transactions/by-uuid/accounts', methods=['GET'])
