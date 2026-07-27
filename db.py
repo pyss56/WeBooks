@@ -12,101 +12,16 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 DB_PATH = os.path.join(DB_DIR, 'data.db')
 
 # ============ 数据库版本管理 ============
-DB_VERSION = 6
-
-
-def _set_schema_version(conn, version: int):
-    """记录数据库 schema 版本号。"""
-    conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
-    conn.execute("DELETE FROM schema_version")
-    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-
-
-def _get_schema_version(conn) -> int:
-    """读取当前数据库 schema 版本号。"""
-    try:
-        row = conn.execute("SELECT version FROM schema_version").fetchone()
-        return row['version'] if row else 0
-    except Exception:
-        return 0
-
-
-def _run_migrations(conn):
-    """按版本顺序执行数据库迁移。"""
-    current = _get_schema_version(conn)
-
-    if current < 6:
-        logger.info("数据库迁移: v6 — ts_parse_rule.config 列 + 菜单项")
-        try:
-            conn.execute("ALTER TABLE ts_parse_rule ADD COLUMN config TEXT DEFAULT NULL")
-            logger.info("  ts_parse_rule.config 列添加完成")
-        except Exception:
-            pass
-        try:
-            row = conn.execute("SELECT id FROM menu WHERE label='记账设置' AND type='dir'").fetchone()
-            if row:
-                pid = row['id']
-                for icon, label, url, sort_order in [
-                    ('🔍', '解析配置', '/ts/rules', 4),
-                ]:
-                    existing = conn.execute("SELECT id FROM menu WHERE label=? AND type='page' AND parent_id=?", (label, pid)).fetchone()
-                    if existing:
-                        continue
-                    conn.execute(
-                        "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, created_by) VALUES (?, 'page', ?, ?, ?, ?, 'system')",
-                        (pid, label, icon, url, sort_order))
-                    mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                    conn.execute("INSERT OR IGNORE INTO role_menu (role_code, menu_id, created_by) VALUES ('admin', ?, 'system')", (mid,))
-                conn.commit()
-                logger.info("  菜单迁移完成")
-        except Exception as e:
-            logger.error(f"  v6 菜单迁移失败: {e}")
-
-        # 去重：删除重复的解析规则（保留 id 最小的）
-        try:
-            conn.execute("""
-                DELETE FROM ts_parse_rule WHERE id NOT IN (
-                    SELECT MIN(id) FROM ts_parse_rule GROUP BY field_type, regex_pattern
-                )
-            """)
-            conn.commit()
-            logger.info("  ts_parse_rule 去重完成")
-            # 添加唯一约束（SQLite 不直接 ADD CONSTRAINT，用 CREATE UNIQUE INDEX）
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ts_rule_unique ON ts_parse_rule(field_type, regex_pattern)")
-            conn.commit()
-        except Exception as e:
-            logger.debug(f"  ts_parse_rule 去重/索引: {e}")
-
-        # 初始化 field_type 字典（已有库也会执行 _init_dict_defaults，但先在这里种子确保）
-        try:
-            conn.execute("INSERT OR IGNORE INTO dict_header (code, name) VALUES ('field_type', '解析字段类型')")
-            row = conn.execute("SELECT id FROM dict_header WHERE code='field_type'").fetchone()
-            if row:
-                hid = row['id']
-                for code, value, order in [('time','交易时间',1),('amount','交易金额',2),('merchant','商家',3),('account','账户',4),('direction','交易方向',5)]:
-                    conn.execute("INSERT OR IGNORE INTO dict_detail (header_id, code, value, sort_order) VALUES (?, ?, ?, ?)", (hid, code, value, order))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"  v6 字典迁移失败: {e}")
-
-        # 删除已废弃的"关键词配置"菜单
-        try:
-            conn.execute("DELETE FROM role_menu WHERE menu_id IN (SELECT id FROM menu WHERE label='关键词配置')")
-            conn.execute("DELETE FROM menu WHERE label='关键词配置'")
-            conn.commit()
-            logger.info("  已删除废弃的关键词配置菜单")
-        except Exception:
-            pass
-
 
 def _create_all_tables(conn):
-    """创建所有表（最终形态）"""
+    """创建所有表（最终形态），包含所有历史迁移逻辑（幂等安全）"""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS user_default_account (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             user_code           TEXT NOT NULL UNIQUE,
             account_id          TEXT NOT NULL,
             income_account_id   TEXT DEFAULT NULL,
+            default_tx_type     TEXT DEFAULT 'expense',
             message_log_id      INTEGER DEFAULT NULL,
             source              TEXT DEFAULT NULL,
             source_user         TEXT DEFAULT NULL,
@@ -333,8 +248,10 @@ def _create_all_tables(conn):
          '07月25日04:05'),
         ('amount',   r'交易金额[:：]\s*([+-]?\d+(?:\.\d{1,2})?)\s*元?', 1,
          '交易金额：10.00元'),
-        ('merchant', r'交易类型[:：]\s*(.+)', 1,
-         '交易类型：尾号5522信用卡人民币消费'),
+        ('amount',   r'消费(\d+\.\d{2})元', 5,
+         '消费10.00元'),
+        ('merchant', r'在([^…]+)…?消费', 5,
+         '在财付通-杭州深度…消费'),
         ('account',  r'尾号\s*(\d{4})\s*的\s*(.+?)(?=\d{2}\s*月|在|消费|退款|$)', 1,
          '尾号5522的龙卡信用卡07月25日'),
         ('direction', r'(消费|支出|付款|退款|退货|收入|到账)', 1, '消费'),
@@ -574,25 +491,18 @@ def get_dict_group(group_code: str) -> dict:
 
 
 def init_db():
-    """初始化数据库表结构"""
+    """初始化数据库表结构（建表 + 默认数据）"""
     conn = get_connection()
     try:
-        # 始终确保所有表结构存在（CREATE TABLE IF NOT EXISTS 幂等安全）
         _create_all_tables(conn)
         conn.commit()
 
-        # 按版本顺序执行迁移
-        _run_migrations(conn)
-
-        # 初始化默认角色和菜单，确保建表后立即生成默认数据
+        # 初始化默认角色和菜单
         init_default_roles()
         init_menus(force=False)
 
-        # 记录 schema 版本信息
-        _set_schema_version(conn, DB_VERSION)
         conn.commit()
-        logger.info(f"数据库初始化完成: {DB_PATH}, 版本: {DB_VERSION}")
-
+        logger.info(f"数据库初始化完成: {DB_PATH}")
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
         raise
@@ -2495,86 +2405,74 @@ def sync_admin_user(config) -> bool:
 # ============ 侧边栏菜单管理 ============
 
 DEFAULT_MENUS = [
-    # (type, parent_1based_index, icon, label, url, sort_order)
-    # 首页（一级）
-    ('page', 0, '🏠', '首页', '/', 1),
+    # (id, type, parent_id, icon, label, url, sort_order)
+    (1, 'page', 0, '🏠', '首页', '/', 1),
     # 系统管理 (dir) - 默认折叠
-    ('dir', 0, '⚙️', '系统管理', None, 2),
-    ('page', 2, '👥', '用户管理', '/user', 1),
-    ('page', 2, '👥', '角色管理', '/roles', 2),
-    ('page', 2, '📐', '菜单管理', '/menu', 3),
-    ('page', 2, '⏰', '计划任务', '/scheduled-tasks', 4),
-    ('page', 2, '📋', '消息日志', '/message-log', 5),
+    (2, 'dir', 0, '⚙️', '系统管理', None, 2),
+    (3, 'page', 2, '👥', '用户管理', '/user', 1),
+    (4, 'page', 2, '👥', '角色管理', '/roles', 2),
+    (5, 'page', 2, '📐', '菜单管理', '/menu', 3),
+    (6, 'page', 2, '⏰', '计划任务', '/scheduled-tasks', 4),
+    (7, 'page', 2, '📋', '消息日志', '/message-log', 5),
     # 系统管理 - 按键权限（用户管理）
-    ('btn', 3, '➕', '用户-新建', '/api/users/create', 99),
-    ('btn', 3, '🔗', '用户-绑定微信', '/api/users/bind-wx', 99),
-    ('btn', 3, '👥', '用户-分配角色', '/api/users/roles', 99),
-    ('btn', 3, '🔑', '用户-设置密码', '/api/users/set-password', 99),
-    ('btn', 3, '🔄', '用户-启用停用', '/api/users/update', 99),
-    ('btn', 3, '🗑️', '用户-删除', '/api/users/delete', 99),
+    (8, 'btn', 3, '➕', '用户-新建', '/api/users/create', 99),
+    (9, 'btn', 3, '🔗', '用户-绑定微信', '/api/users/bind-wx', 99),
+    (10, 'btn', 3, '👥', '用户-分配角色', '/api/users/roles', 99),
+    (11, 'btn', 3, '🔑', '用户-设置密码', '/api/users/set-password', 99),
+    (12, 'btn', 3, '🔄', '用户-启用停用', '/api/users/update', 99),
+    (13, 'btn', 3, '🗑️', '用户-删除', '/api/users/delete', 99),
     # 系统管理 - 按键权限（角色管理）
-    ('btn', 4, '➕', '角色-新建', '/api/roles/create', 99),
-    ('btn', 4, '✏️', '角色-编辑', '/api/roles/update', 99),
-    ('btn', 4, '🗑️', '角色-删除', '/api/roles/delete', 99),
-    ('btn', 4, '🔐', '角色-菜单授权', '/api/roles/set-menu-bindings', 99),
-    ('btn', 4, '👤', '角色-绑定用户', '/api/roles/set-users', 99),
+    (14, 'btn', 4, '➕', '角色-新建', '/api/roles/create', 99),
+    (15, 'btn', 4, '✏️', '角色-编辑', '/api/roles/update', 99),
+    (16, 'btn', 4, '🗑️', '角色-删除', '/api/roles/delete', 99),
+    (17, 'btn', 4, '🔐', '角色-菜单授权', '/api/roles/set-menu-bindings', 99),
+    (18, 'btn', 4, '👤', '角色-绑定用户', '/api/roles/set-users', 99),
     # 系统管理 - 按键权限（菜单管理）
-    ('btn', 5, '➕', '菜单-新建', '/api/menus/create', 99),
-    ('btn', 5, '✏️', '菜单-编辑', '/api/menus/update', 99),
-    ('btn', 5, '🗑️', '菜单-删除', '/api/menus/delete', 99),
+    (19, 'btn', 5, '➕', '菜单-新建', '/api/menus/create', 99),
+    (20, 'btn', 5, '✏️', '菜单-编辑', '/api/menus/update', 99),
+    (21, 'btn', 5, '🗑️', '菜单-删除', '/api/menus/delete', 99),
     # 记账设置 (dir) - 默认折叠
-    ('dir', 0, '⚙️', '记账设置', None, 3),
-    ('page', 22, '📂', '科目管理', '/categories', 1),
-    ('page', 22, '📊', '预算管理', '/budgets', 2),
-    ('page', 22, '💳', '账户设置', '/accounts', 3),
-    ('page', 22, '🔍', '解析配置', '/ts/rules', 4),
+    (22, 'dir', 0, '⚙️', '记账设置', None, 3),
+    (23, 'page', 22, '📂', '科目管理', '/categories', 1),
+    (24, 'page', 22, '📊', '预算管理', '/budgets', 2),
+    (25, 'page', 22, '💳', '账户设置', '/accounts', 3),
+    (26, 'page', 22, '🔍', '解析配置', '/ts/rules', 4),
+    (27, 'page', 22, '🏷️', '别名管理', '/aliases', 5),
+    # 按键权限（别名管理）
+    (28, 'btn', 27, '✏️', '别名-编辑', '/api/aliases/modify', 99),
+    (29, 'btn', 27, '🗑️', '别名-删除', '/api/aliases/delete', 99),
     # 记账管理 (dir) - 默认展开
-    ('dir', 0, '📒', '记账管理', None, 4),
-    ('page', 26, '✏️', '页面记账', '/add-transaction', 1),
-    ('page', 26, '💰', '交易查询', '/transaction', 2),
-    ('page', 26, '✅', '对账管理', '/reconciliation', 3),
+    (30, 'dir', 0, '📒', '记账管理', None, 4),
+    (31, 'page', 30, '✏️', '页面记账', '/add-transaction', 1),
+    (32, 'page', 30, '💰', '交易查询', '/transaction', 2),
+    (33, 'page', 30, '✅', '对账管理', '/reconciliation', 3),
     # 按键权限（科目管理）
-    ('btn', 23, '➕', '科目-新建', '/api/categories/add', 99),
-    ('btn', 23, '✏️', '科目-修改', '/api/categories/modify', 99),
-    ('btn', 23, '🗑️', '科目-删除', '/api/categories/delete', 99),
+    (34, 'btn', 23, '➕', '科目-新建', '/api/categories/add', 99),
+    (35, 'btn', 23, '✏️', '科目-修改', '/api/categories/modify', 99),
+    (36, 'btn', 23, '🗑️', '科目-删除', '/api/categories/delete', 99),
     # 按键权限（账户管理）
-    ('btn', 25, '➕', '账户-新建', '/api/accounts/create', 99),
-    ('btn', 25, '✏️', '账户-修改', '/api/accounts/modify', 99),
-    ('btn', 25, '🗑️', '账户-删除', '/api/accounts/delete', 99),
+    (37, 'btn', 25, '➕', '账户-新建', '/api/accounts/create', 99),
+    (38, 'btn', 25, '✏️', '账户-修改', '/api/accounts/modify', 99),
+    (39, 'btn', 25, '🗑️', '账户-删除', '/api/accounts/delete', 99),
 ]
 
 
 def init_menus(force: bool = False):
-    """初始化默认菜单，并只在首次建表/空表时补入默认数据。"""
+    """初始化默认菜单，按固定 ID 写入（INSERT OR IGNORE 幂等安全）"""
     conn = get_connection()
     try:
-        cur = conn.execute("SELECT COUNT(*) as cnt FROM menu")
-        menu_count = cur.fetchone()['cnt']
-        if not force and menu_count > 0:
-            return
-
-        if menu_count > 0 and force:
-            logger.info("检测到已有菜单数据，跳过重新初始化")
-            return
-
-        if menu_count == 0:
-            logger.info("menu 表为空，初始化默认菜单")
-        else:
-            logger.info("按初始化流程补齐默认菜单")
+        if force:
+            logger.info("强制重新初始化默认菜单")
+            # 先删除现有菜单及相关权限，再重新插入
+            conn.execute("DELETE FROM role_menu")
+            conn.execute("DELETE FROM menu")
 
         menu_ids = []
-        for idx, (typ, parent_ref, icon, label, url, sort_order) in enumerate(DEFAULT_MENUS):
-            pid = 0
-            if isinstance(parent_ref, int) and parent_ref > 0:
-                # parent_ref 是 1-based 索引，指向 menu_ids 中的位置
-                pid = menu_ids[parent_ref - 1] if parent_ref <= len(menu_ids) else 0
-            elif isinstance(parent_ref, str) and parent_ref:
-                pid = (menu_ids[idx] if idx > 0 else 0)  # fallback, won't happen
+        for (mid, typ, parent_id, icon, label, url, sort_order) in DEFAULT_MENUS:
+            expanded = 1 if label == '记账管理' else (0 if label in ('系统管理','记账设置') else (1 if typ == 'dir' else 0))
             conn.execute(
-                "INSERT INTO menu (parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'system')",
-                (pid, typ, label, icon, url, sort_order,
-                 1 if label == '记账管理' else (0 if label in ('系统管理','记账设置') else (1 if typ == 'dir' else 0))))
-            mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                "INSERT OR IGNORE INTO menu (id, parent_id, type, label, icon, url, sort_order, default_expanded, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system')",
+                (mid, parent_id, typ, label, icon, url, sort_order, expanded))
             menu_ids.append(mid)
         conn.commit()
         for mid in menu_ids:
@@ -2777,6 +2675,20 @@ def get_user_role_codes(user_code: str) -> list:
         return [r['role_code'] for r in rows]
     except Exception as e:
         logger.error(f"获取用户角色失败: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_default_role_codes() -> list:
+    """获取所有标记为默认的角色编码（新用户未分配角色时使用）"""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT code FROM role WHERE is_default=1").fetchall()
+        return [r['code'] for r in rows]
+    except Exception as e:
+        logger.error(f"获取默认角色失败: {e}")
         return []
     finally:
         conn.close()

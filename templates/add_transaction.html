@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+手机{% extends "base.html" %}
 {% block title %}页面记账{% endblock %}
 
 {% block content %}
@@ -7,6 +7,247 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- ── 智能识别区域：短信 Tab / 截图 Tab ── -->
+<div class="card" style="max-width:520px;margin-bottom:16px;">
+  <div class="card-body">
+    <div class="ocr-tabs">
+      <button class="ocr-tab active" data-tab="notice" onclick="switchOcrTab('notice')">📩 短信</button>
+      <button class="ocr-tab" data-tab="ocr" onclick="switchOcrTab('ocr')">📷 截图</button>
+    </div>
+
+    <!-- 短信 Tab -->
+    <div class="ocr-tab-content" id="tabNotice">
+      <textarea id="noticeInput" class="ocr-textarea" placeholder="粘贴银行交易短信或通知文本..." oninput="parseNotice(this.value)"></textarea>
+      <div id="noticeLoading" class="ocr-loading">⏳ 解析中...</div>
+      <div id="noticeResult" class="ocr-result"></div>
+      <div id="noticeError" class="ocr-error"></div>
+    </div>
+
+    <!-- 截图 Tab -->
+    <div class="ocr-tab-content" id="tabOcr" style="display:none;">
+      <div class="ocr-upload-zone" id="ocrUploadZone" onclick="document.getElementById('ocrFileInput').click()">
+        <div class="ocr-upload-icon">📤</div>
+        <div class="ocr-upload-text">点击上传截图</div>
+        <div class="ocr-upload-hint">JPG/PNG，不超过20MB</div>
+      </div>
+      <input type="file" id="ocrFileInput" accept="image/png,image/jpeg,image/jpg,image/webp" style="display:none;" onchange="handleOcrFile(this)">
+      <div id="ocrLoading" class="ocr-loading">⏳ 识别中...</div>
+      <div id="ocrResult" class="ocr-result"></div>
+      <div id="ocrError" class="ocr-error"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+var ocrData = null;
+var _unmatchedHints = [];
+var DEFAULT_TX_TYPE = '{{ default_tx_type }}';
+var DEFAULT_ACCOUNT_ID = '{{ default_account_id }}';
+
+// 页面加载时应用默认模板（延迟到 switchType 就绪后）
+(function() {
+  var checkReady = setInterval(function() {
+    if (typeof switchType === 'function') {
+      clearInterval(checkReady);
+      if (DEFAULT_TX_TYPE === 'income' || DEFAULT_TX_TYPE === 'transfer') {
+        switchType(DEFAULT_TX_TYPE);
+      }
+      if (DEFAULT_ACCOUNT_ID) {
+        var acctSel = document.getElementById('accountSelect');
+        for (var i = 0; i < acctSel.options.length; i++) {
+          if (acctSel.options[i].value === DEFAULT_ACCOUNT_ID) {
+            acctSel.selectedIndex = i;
+            break;
+          }
+        }
+      }
+    }
+  }, 50);
+})();
+
+function switchOcrTab(name) {
+  document.querySelectorAll('.ocr-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('.ocr-tab-content').forEach(function(c) { c.style.display = 'none'; });
+  document.querySelector('.ocr-tab[data-tab="' + name + '"]').classList.add('active');
+  document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1)).style.display = 'block';
+}
+
+function handleOcrFile(input) {
+  _unmatchedHints = [];
+  clearOcrHint();
+  var file = input.files[0];
+  if (!file) return;
+  var ext = file.name.split('.').pop().toLowerCase();
+  if (!['png','jpg','jpeg','webp'].includes(ext)) {
+    showOcrError('不支持的文件格式');
+    return;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    showOcrError('文件大小超过20MB');
+    return;
+  }
+  document.getElementById('ocrUploadZone').style.display = 'none';
+  document.getElementById('ocrLoading').style.display = 'block';
+  document.getElementById('ocrResult').style.display = 'none';
+  document.getElementById('ocrError').style.display = 'none';
+
+  var fd = new FormData();
+  fd.append('file', file);
+  fetch('/api/ocr/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      document.getElementById('ocrLoading').style.display = 'none';
+      if (r.success) {
+        ocrData = r;
+        fillFormFromOcr(r);
+        showOcrResult(r);
+      } else {
+        showOcrError(r.message || '识别失败');
+      }
+    })
+    .catch(function() {
+      document.getElementById('ocrLoading').style.display = 'none';
+      showOcrError('网络错误');
+    });
+}
+
+// ── 短信文本解析 ──
+var noticeTimer = null;
+function parseNotice(text) {
+  clearTimeout(noticeTimer);
+  clearOcrHint();
+  document.getElementById('noticeResult').style.display = 'none';
+  document.getElementById('noticeError').style.display = 'none';
+  if (!text || text.trim().length < 10) return;
+  noticeTimer = setTimeout(function() {
+    _unmatchedHints = [];
+    document.getElementById('noticeLoading').style.display = 'block';
+    fetch('/api/transactions/parse-notice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.trim() }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      document.getElementById('noticeLoading').style.display = 'none';
+      if (r.success) {
+        // 统一字段名：account_hint → account_name，方便复用 fillFormFromOcr
+        if (r.account_hint && !r.account_name) r.account_name = r.account_hint;
+        ocrData = r;
+        _unmatchedHints = [];
+        fillFormFromOcr(r);
+        var html = '<div style="font-size:13px;">';
+        html += '<div style="color:#07c160;margin-bottom:4px;">✅ 已识别</div>';
+        if (r.amount) html += '<div>💵 ¥' + r.amount.toFixed(2) + '</div>';
+        if (r.merchant) html += '<div>🏪 ' + r.merchant + '</div>';
+        if (r.account_name) html += '<div>🏦 ' + r.account_name + '</div>';
+        if (r.transaction_time) html += '<div>🕐 ' + r.transaction_time + '</div>';
+        html += buildUnmatchedHtml();
+        html += '</div>';
+        document.getElementById('noticeResult').innerHTML = html;
+        document.getElementById('noticeResult').style.display = 'block';
+      } else {
+        document.getElementById('noticeError').textContent = '⚠️ ' + (r.message || '未识别到交易信息');
+        document.getElementById('noticeError').style.display = 'block';
+      }
+    })
+    .catch(function() {
+      document.getElementById('noticeLoading').style.display = 'none';
+    });
+  }, 500);
+}
+
+function showOcrResult(r) {
+  var html = '<div style="font-size:13px;line-height:1.8;">';
+  html += '<div style="margin-bottom:4px;font-size:12px;color:#888;">📷 识别内容</div>';
+  if (r.amount) html += '<div>💵 ¥' + r.amount.toFixed(2) + '</div>';
+  if (r.merchant) html += '<div>🏪 ' + r.merchant + '</div>';
+  if (r.account_name) html += '<div>🏦 ' + r.account_name + '</div>';
+  if (r.transaction_time) html += '<div>🕐 ' + r.transaction_time + '</div>';
+  html += buildUnmatchedHtml();
+  html += '</div>';
+  document.getElementById('ocrResult').innerHTML = html;
+  document.getElementById('ocrResult').style.display = 'block';
+}
+
+function showOcrError(msg) {
+  document.getElementById('ocrUploadZone').style.display = 'block';
+  var el = document.getElementById('ocrError');
+  el.textContent = '❌ ' + msg;
+  el.style.display = 'block';
+}
+
+  _unmatchedHints = [];
+function fillFormFromOcr(r) {
+  if (!r) return;
+
+  // 切换类型
+  switchType(r.bill_type || 'expense');
+
+  // 金额（取绝对值）
+  if (r.amount) {
+    document.getElementById('amountInput').value = Math.abs(r.amount).toFixed(2);
+  }
+  // 时间
+  if (r.transaction_time) {
+    var t = r.transaction_time.replace(' ', 'T');
+    if (t.length >= 16) t = t.substring(0, 16);
+    document.getElementById('timeInput').value = t;
+  }
+  // 备注
+  if (r.merchant) {
+    document.getElementById('commentInput').value = r.merchant;
+  }
+  // 匹配科目
+  if (r.merchant) {
+    var catSel = document.getElementById('categorySelect');
+    var resolved = false;
+    if (r.resolved_category_id) {
+      for (var i = 0; i < catSel.options.length; i++) {
+        if (catSel.options[i].value === r.resolved_category_id) {
+          catSel.selectedIndex = i;
+          resolved = true;
+          break;
+        }
+      }
+    }
+    if (!resolved) { _unmatchedHints.push({label:'科目', value:r.merchant}); }
+  }
+  // 匹配账户
+  if (r.account_name) {
+    var acctSel = document.getElementById('accountSelect');
+    var resolved = false;
+    if (r.resolved_account_id) {
+      for (var i = 0; i < acctSel.options.length; i++) {
+        if (acctSel.options[i].value === r.resolved_account_id) {
+          acctSel.selectedIndex = i;
+          resolved = true;
+          break;
+        }
+      }
+    }
+    if (!resolved) { _unmatchedHints.push({label:'账户', value:r.account_name}); }
+  }
+}
+
+function buildUnmatchedHtml() {
+  var html = '';
+  for (var i = 0; i < _unmatchedHints.length; i++) {
+    var h = _unmatchedHints[i];
+    html += '<div style="margin-top:4px;">⚠️ 未匹配到' + h.label + '「' + h.value + '」，请在下方的' + h.label + '下拉中选择</div>';
+  }
+  if (html) {
+    html = '<div style="font-size:12px;color:#e4393c;background:#fce4ec;padding:8px 12px;border-radius:6px;line-height:1.6;">' + html + '</div>';
+  }
+  return html;
+}
+
+function clearOcrHint() {
+  _unmatchedHints = [];
+}
+</script>
+
+<!-- ── 手动记账表单 ── -->
 <div class="card" style="max-width:520px;">
   <div class="card-header" style="padding-bottom:0;border-bottom:none;">
     <!-- 类型切换 -->
@@ -18,6 +259,10 @@
       <button type="button" class="type-btn" data-type="income" onclick="switchType('income')"
         style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#f5f5f5;color:#888;">
         💰 收入
+      </button>
+      <button type="button" class="type-btn" data-type="transfer" onclick="switchType('transfer')"
+        style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#f5f5f5;color:#888;">
+        🔄 转账
       </button>
     </div>
   </div>
@@ -37,9 +282,9 @@
     <div class="field">
       <label>金额（元）<span style="color:#e4393c;">*</span></label>
       <div style="position:relative;">
-        <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:18px;color:#bbb;font-weight:600;">¥</span>
+        <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:16px;color:#bbb;font-weight:600;pointer-events:none;z-index:1;">¥</span>
         <input type="number" id="amountInput" step="0.01" min="0.01" placeholder="0.00"
-          style="padding-left:36px;" oninput="clearError()">
+          style="padding-left:32px;position:relative;z-index:2;" oninput="clearError()">
       </div>
     </div>
     <div class="field">
@@ -50,6 +295,15 @@
         <option value="{{ acct.id }}"{% if acct.id|string == default_account_id|string %} selected{% endif %}>
           {{ acct.name }}{% if acct._display_name and acct._display_name != acct.name %}（{{ acct._display_name.replace(acct.name, '').strip('()') }}）{% endif %}
         </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field" id="toAccountField" style="display:none;">
+      <label>转入账户 <span style="color:#e4393c;">*</span></label>
+      <select id="toAccountSelect" onchange="clearError()">
+        <option value="">请选择转入账户</option>
+        {% for acct in accounts %}
+        <option value="{{ acct.id }}">{{ acct.name }}</option>
         {% endfor %}
       </select>
     </div>
@@ -93,7 +347,6 @@
     <p id="resultTitle" style="font-size:18px;font-weight:600;color:#07c160;">交易已创建</p>
     <p id="resultDetail" class="sub" style="margin-top:4px;"></p>
     <div style="margin-top:16px;display:flex;gap:8px;justify-content:center;">
-      <button class="btn" onclick="resetForm()">继续记账</button>
       <a href="/transaction" class="btn btn-outline">查看交易</a>
     </div>
   </div>
@@ -106,7 +359,7 @@
     <div style="margin-top:10px;font-size:13px;color:#666;line-height:1.8;">
       <p>• 选择 <strong>科目</strong> 后系统会记录对应分类</p>
       <p>• 金额支持两位小数，如 <code>12.50</code></p>
-      <p>• 如需记录 <strong>转账</strong>，请前往转账配置页面操作</p>
+      <p>• 切换 <strong>转账</strong> 可快速记录转账交易</p>
       <p>• 记账后可在 <a href="/transaction" style="color:#07c160;">交易查询</a> 中查看、编辑或删除</p>
     </div>
   </details>
@@ -121,6 +374,15 @@
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
   overflow: hidden;
 }
+.ocr-upload-zone {
+  border: 2px dashed #d9d9d9;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.ocr-upload-zone:hover { border-color: #07c160; background: #f6ffed; }
 .card-header { padding: 24px 24px 16px; }
 .card-body { padding: 0 24px 24px; }
 .msg-box { text-align: center; padding: 40px 24px; }
@@ -176,11 +438,22 @@
 }
 .toast.success { background: #07c160; }
 .toast.error { background: #e4393c; }
+.toast.info { background: #1a73e8; }
 .toast.show { display: block; animation: fadeIn .3s; }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+/* ── OCR Tab ── */
+.ocr-tabs { display:flex;gap:0;margin-bottom:12px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden; }
+.ocr-tab { flex:1;padding:8px 0;border:none;font-size:13px;font-weight:600;cursor:pointer;background:#f5f5f5;color:#888;transition:all .15s; }
+.ocr-tab.active { background:#07c160;color:#fff; }
+.ocr-tab:not(.active):hover { background:#e8f5e9;color:#07c160; }
+.ocr-textarea { width:100%;padding:10px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:14px;font-family:inherit;outline:none;resize:vertical;min-height:60px;box-sizing:border-box; }
+.ocr-textarea:focus { border-color:#07c160 !important;box-shadow:0 0 0 2px rgba(7,193,96,0.1); }
+.ocr-loading { display:none;text-align:center;padding:12px;color:#888;font-size:13px; }
+.ocr-result { display:none;margin-top:8px;font-size:13px;line-height:1.8; }
+.ocr-error { display:none;color:#c62828;background:#fce4ec;padding:8px 12px;border-radius:6px;font-size:13px;margin-top:8px; }
 .type-btn { outline: none; }
 .type-btn:hover { filter: brightness(0.95); }
 code {
@@ -212,18 +485,35 @@ function switchType(type) {
   var btns = document.querySelectorAll('.type-btn');
   btns.forEach(function(btn) {
     var isActive = btn.dataset.type === type;
-    btn.style.background = isActive ? (type === 'expense' ? '#e4393c' : '#2e7d32') : '#f5f5f5';
-    btn.style.color = isActive ? '#fff' : '#888';
+    var bg = '#f5f5f5';
+    var fg = '#888';
+    if (isActive) {
+      bg = type === 'expense' ? '#e4393c' : type === 'income' ? '#2e7d32' : '#1565c0';
+      fg = '#fff';
+    }
+    btn.style.background = bg;
+    btn.style.color = fg;
   });
-  var sel = $('categorySelect');
-  sel.innerHTML = '<option value="">请选择科目</option>';
-  var cats = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
-  cats.forEach(function(cat) {
-    var opt = document.createElement('option');
-    opt.value = cat.id;
-    opt.textContent = cat.name + (cat.parent_name ? '（' + cat.parent_name + '）' : '');
-    sel.appendChild(opt);
-  });
+  // 转账模式：隐藏科目、显示转入账户
+  var catField = $('categorySelect');
+  var toAcctField = document.getElementById('toAccountField');
+  if (type === 'transfer') {
+    catField.style.display = 'none';
+    toAcctField.style.display = 'block';
+    // 转账科目固定为"转账"
+    catField.innerHTML = '<option value="" selected>转账</option>';
+  } else {
+    catField.style.display = '';
+    toAcctField.style.display = 'none';
+    catField.innerHTML = '<option value="">请选择科目</option>';
+    var cats = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+    cats.forEach(function(cat) {
+      var opt = document.createElement('option');
+      opt.value = cat.id;
+      opt.textContent = cat.name + (cat.parent_name ? '（' + cat.parent_name + '）' : '');
+      catField.appendChild(opt);
+    });
+  }
   clearError();
 }
 
@@ -239,17 +529,13 @@ function showError(msg) {
 }
 
 function resetForm() {
+  ocrData = null;
   $('resultBox').style.display = 'none';
   $('submitBtn').style.display = '';
   $('amountInput').value = '';
   $('commentInput').value = '';
-  $('categorySelect').value = '';
-  $('accountSelect').value = '';
-  {% if session_is_admin %}
-  $('userSelect').value = '';
-  {% else %}
-  $('userSelect').value = '{{ session_user_code }}';
-  {% endif %}
+  // 应用默认模板
+  loadDefaultTemplate();
   var now = new Date();
   var pad = function(n) { return String(n).padStart(2, '0'); };
   $('timeInput').value =
@@ -258,43 +544,122 @@ function resetForm() {
   clearError();
 }
 
+function loadDefaultTemplate() {
+  // 切换默认类型
+  if (DEFAULT_TX_TYPE === 'income' || DEFAULT_TX_TYPE === 'transfer') {
+    switchType(DEFAULT_TX_TYPE);
+  } else {
+    switchType('expense');
+  }
+  // 默认账户
+  if (DEFAULT_ACCOUNT_ID) {
+    var acctSel = document.getElementById('accountSelect');
+    for (var i = 0; i < acctSel.options.length; i++) {
+      if (acctSel.options[i].value === DEFAULT_ACCOUNT_ID) {
+        acctSel.selectedIndex = i;
+        break;
+      }
+    }
+  }
+  // 清空转入账户
+  if (document.getElementById('toAccountSelect')) {
+    document.getElementById('toAccountSelect').value = '';
+  }
+}
+
 async function submitTransaction() {
   var categoryId = $('categorySelect').value;
   var amount = $('amountInput').value;
   var accountId = $('accountSelect').value;
+  var toAccountId = $('toAccountSelect') ? $('toAccountSelect').value : '';
   var comment = $('commentInput').value.trim();
   var userCode = $('userSelect').value;
   var transactionTime = $('timeInput').value;
 
-  if (!categoryId) { showError('请选择科目'); return; }
+  if (currentType !== 'transfer' && !categoryId) { showError('请选择科目'); return; }
   if (!amount || parseFloat(amount) <= 0) { showError('请输入有效的金额（大于0）'); return; }
   if (!accountId) { showError('请选择账户'); return; }
+  if (currentType === 'transfer' && !toAccountId) { showError('请选择转入账户'); return; }
 
   var btn = $('submitBtn');
   btn.disabled = true;
   btn.textContent = '⏳ 提交中...';
 
   try {
-    var catSel = $('categorySelect');
-    var catText = catSel.options[catSel.selectedIndex].textContent.split('（')[0] || '';
+    var catText = '转账';
+    if (currentType !== 'transfer') {
+      var catSel = $('categorySelect');
+      catText = catSel.options[catSel.selectedIndex].textContent.split('（')[0] || '';
+    }
+
+    var payload = {
+      bill_type: currentType,
+      category_name: catText,
+      amount: parseFloat(amount),
+      account_id: accountId,
+      comment: comment,
+      user_code: userCode || null,
+      transaction_time: transactionTime ? transactionTime.replace('T', ' ') + ':00' : undefined,
+    };
+    if (currentType === 'transfer') {
+      payload.to_account_id = toAccountId;
+    }
 
     var resp = await fetch('/api/transactions/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        bill_type: currentType,
-        category_name: catText,
-        amount: parseFloat(amount),
-        account_id: accountId,
-        comment: comment,
-        user_code: userCode || null,
-        transaction_time: transactionTime ? transactionTime.replace('T', ' ') + ':00' : undefined,
-      }),
+      body: JSON.stringify(payload),
     });
     var result = await resp.json();
 
     if (result.success) {
-      var title = currentType === 'expense' ? '💸 支出已记录' : '💰 收入已记录';
+      // ── OCR 别名保存 ──
+      if (ocrData) {
+        var aliasPromises = [];
+        if (ocrData.merchant && categoryId) {
+          aliasPromises.push(
+            fetch('/api/aliases/quick-save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input_text: ocrData.merchant,
+                target_type: 'category',
+                target_id: categoryId,
+                target_name: catText,
+              }),
+            })
+          );
+        }
+        if (ocrData.account_name && accountId) {
+          var acctSel = $('accountSelect');
+          var acctName = acctSel.options[acctSel.selectedIndex].textContent;
+          aliasPromises.push(
+            fetch('/api/aliases/quick-save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input_text: ocrData.account_name,
+                target_type: 'account',
+                target_id: accountId,
+                target_name: acctName,
+              }),
+            })
+          );
+        }
+        if (aliasPromises.length > 0) {
+          // 等待别名保存完成，不影响主流程
+          Promise.all(aliasPromises).then(function(responses) {
+            responses.forEach(function(r) {
+              if (!r.ok) console.warn('[OCR] 别名保存失败:', r.status);
+            });
+          }).catch(function(e) {
+            console.warn('[OCR] 别名保存异常:', e);
+          });
+        }
+      }
+
+      var titleMap = { expense: '💸 支出已记录', income: '💰 收入已记录', transfer: '🔄 转账已记录' };
+      var title = titleMap[currentType] || '✅ 交易已创建';
       var detail = '金额：¥' + parseFloat(amount).toFixed(2);
       $('resultTitle').textContent = title;
       $('resultDetail').textContent = detail;

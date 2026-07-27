@@ -32,7 +32,7 @@ jobs:
           BASE="${{ env.DOCKER_IMAGE }}"
           VER="${{ steps.version.outputs.version }}"
           if [[ "${{ github.ref_name }}" == "beta" ]]; then
-            echo "tags=${BASE}:${VER}-beta,${BASE}:beta" >> $GITHUB_OUTPUT
+            echo "tags=${BASE}:beta" >> $GITHUB_OUTPUT
           else
             echo "tags=${BASE}:${VER},${BASE}:latest" >> $GITHUB_OUTPUT
           fi

@@ -343,6 +343,7 @@ async function loadAccounts() {
         if (accounts.length === 0) {
             html += '<div class="empty-msg">暂无账户</div>';
         } else {
+            const _mobile = window.innerWidth < 769;
             html += '<div class="card">';
             for (const acc of accounts) {
                 const color = acc.color || 'ff6b22';
@@ -355,19 +356,47 @@ async function loadAccounts() {
                 const boundUsers = bindingMap[acc.id] || [];
                 const catName = _accountCategories[acc.category]?.name || '其他';
                 const isLiability = [3, 9, 10].includes(acc.category);
-                html += '<div class="parent-row">';
-                html += '<span class="acct-name"><i class="' + iconCss + '" style="color:#' + color + ';"></i> ' + escapeHtml(acc.name) + (acc.hidden ? ' <span style="font-size:10px;color:#bbb;">👁️‍🗨️</span>' : '') + '</span>';
-                html += '<span class="acct-desc">' + catName + ' · ' + currency + (acc.comment ? ' · ' + escapeHtml(acc.comment) : '') + (boundUsers.length ? ' · 👥 ' + boundUsers.map(t => escapeHtml(t)).join(',') : '') + '</span>';
-                html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(balance) + '</span>';
-                html += '<span class="actions">';
-                html += `<button class="btn btn-outline btn-sm" onclick="showEditModal('${acc.id}')" title="编辑">✏️</button>`;
-                if (subs.length === 0) {
-                html += `<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${acc.id}','${escapeHtml(acc.name)}')" title="绑定用户">👥</button>`;
+                function _acctRow(label, extra, bal, isSub) {
+                    var r = '<div class="parent-row"' + (isSub ? ' style="padding-left:36px;"' : '') + '>';
+                    r += '<span class="acct-name">' + label + '</span>';
+                    if (extra) r += '<span class="acct-desc">' + extra + '</span>';
+                    r += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(bal) + '</span>';
+                    return r;
                 }
-                html += `<button class="btn btn-outline btn-sm" onclick="showAddSubAccountModal('${acc.id}','${escapeHtml(acc.name)}')" title="添加子账户">➕</button>`;
-                html += `<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${acc.id}','${escapeHtml(acc.name)}')">🗑️</button>`;
-                html += '</span>';
-                html += '</div>';
+                function _acctActions(btns) {
+                    if (!_mobile) {
+                        return '<span class="actions">' + btns.join('') + '</span></div>';
+                    }
+                    return '</div>'; // close parent-row
+                }
+                function _acctSwipeEnd(btns) {
+                    if (!_mobile) return '';
+                    return '<div class="card-swipe-wrap" style="border-radius:0;"><div class="card-swipe-inner"><div style="flex:1 0 100%;width:100%;padding:0;">' + 
+                           '<div class="parent-row" style="border:none;padding:10px 16px;">' + 
+                           '</div></div>' +
+                           '<div class="card-actions" style="padding:10px;">' + btns.join('') + '</div></div>' +
+                           '<div class="swipe-hint"></div></div>';
+                }
+                var parentBtns = [
+                    `<button class="btn btn-outline btn-sm" onclick="showEditModal('${acc.id}')" title="编辑">✏️</button>`,
+                ];
+                if (subs.length === 0) {
+                    parentBtns.push(`<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${acc.id}','${escapeHtml(acc.name)}')" title="绑定用户">👥</button>`);
+                }
+                parentBtns.push(`<button class="btn btn-outline btn-sm" onclick="showAddSubAccountModal('${acc.id}','${escapeHtml(acc.name)}')" title="添加子账户">➕</button>`);
+                parentBtns.push(`<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${acc.id}','${escapeHtml(acc.name)}')">🗑️</button>`);
+
+                var pLabel = '<i class="' + iconCss + '" style="color:#' + color + ';"></i> ' + escapeHtml(acc.name) + (acc.hidden ? ' <span style="font-size:10px;color:#bbb;">👁️‍🗨️</span>' : '');
+                var pExtra = catName + ' · ' + currency + (acc.comment ? ' · ' + escapeHtml(acc.comment) : '') + (boundUsers.length ? ' · 👥 ' + boundUsers.map(t => escapeHtml(t)).join(',') : '');
+                if (_mobile) {
+                    html += '<div class="card-swipe-wrap" style="border-radius:0;"><div class="card-swipe-inner">';
+                    html += '<div style="flex:1 0 100%;width:100%;">' + _acctRow(pLabel, pExtra, balance, false) + '</div>';
+                    html += '<div class="card-actions" style="padding:10px;">' + parentBtns.join('') + '</div></div>';
+                    html += '<div class="swipe-hint"></div></div>';
+                } else {
+                    html += _acctRow(pLabel, pExtra, balance, false);
+                    html += '<span class="actions">' + parentBtns.join('') + '</span></div>';
+                }
                 if (subs.length > 0) {
                     for (const sub of subs) {
                         const sb = (sub.balance || 0) / 100;
@@ -376,21 +405,32 @@ async function loadAccounts() {
                         const si = sub.icon || '1';
                         const sIconMap = _accountIcons.find(i => i.id === si);
                         const sCss = sIconMap ? sIconMap.css : 'las la-circle';
-                        html += '<div class="child-item">';
-                        html += '<span class="name"><span class="sub-dot">└─</span> <i class="' + sCss + '" style="color:#' + sc + ';width:16px;text-align:center;font-size:13px;"></i> ' + escapeHtml(sub.name) + (subUsers.length ? ' <span style="font-size:10px;color:#aaa;">👥' + subUsers.join(',') + '</span>' : '') + '</span>';
-                        html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(sb) + '</span>';
-                        html += '<span class="actions">';
-                        html += `<button class="btn btn-outline btn-sm" onclick="showEditModal('${sub.id}')">✏️</button>`;
-                        html += `<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${sub.id}','${escapeHtml(sub.name)}')" title="绑定用户">👥</button>`;
-                        html += `<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${sub.id}','${escapeHtml(sub.name)}')">🗑️</button>`;
-                        html += '</span>';
-                        html += '</div>';
+                        var sLabel = '<span class="sub-dot">└─</span> <i class="' + sCss + '" style="color:#' + sc + ';width:16px;text-align:center;font-size:13px;"></i> ' + escapeHtml(sub.name) + (subUsers.length ? ' <span style="font-size:10px;color:#aaa;">👥' + subUsers.join(',') + '</span>' : '');
+                        var sBtns = [
+                            `<button class="btn btn-outline btn-sm" onclick="showEditModal('${sub.id}')">✏️</button>`,
+                            `<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${sub.id}','${escapeHtml(sub.name)}')" title="绑定用户">👥</button>`,
+                            `<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${sub.id}','${escapeHtml(sub.name)}')">🗑️</button>`,
+                        ];
+                        if (_mobile) {
+                            html += '<div class="card-swipe-wrap" style="border-radius:0;"><div class="card-swipe-inner">';
+                            html += '<div style="flex:1 0 100%;width:100%;"><div class="child-item" style="border:none;padding:8px 16px 8px 36px;">';
+                            html += '<span class="name">' + sLabel + '</span>';
+                            html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(sb) + '</span></div></div>';
+                            html += '<div class="card-actions" style="padding:10px;">' + sBtns.join('') + '</div></div>';
+                            html += '<div class="swipe-hint"></div></div>';
+                        } else {
+                            html += '<div class="child-item">';
+                            html += '<span class="name">' + sLabel + '</span>';
+                            html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(sb) + '</span>';
+                            html += '<span class="actions">' + sBtns.join('') + '</span></div>';
+                        }
                     }
                 }
             }
             html += '</div>';
         }
         container.innerHTML = html;
+        if (window.innerWidth < 769) initSwipeCards(container);
     } catch (e) {
         container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
     }

@@ -4,6 +4,8 @@
 import json
 import logging
 import os
+import re
+from datetime import datetime
 
 from flask import Blueprint, request, jsonify
 
@@ -18,6 +20,9 @@ bp = Blueprint('wecom_routes', __name__)
 config = get_config()
 message_handler = WeComMessageHandler()
 wecom_client = WeComClient()
+
+# 已处理的图片 MsgId 缓存（防止 WeChat Work 超时重试导致重复入账）
+_processed_image_ids = set()
 
 MENU_BUTTONS = [
     {"name": "家庭", "sub_button": [
@@ -37,6 +42,169 @@ MENU_BUTTONS = [
         {"name": "使用帮助", "type": "click", "key": "HELP"},
     ]},
 ]
+
+
+def _clean_account_name(raw: str) -> str:
+    """清理 OCR 识别的账户名：去除括号，保留数字
+
+    如 "建设眼行信用卡(5522)" → "建设眼行信用卡5522"
+    如 "建设眼行信用卡55522"  → "建设眼行信用卡55522"
+    """
+    return re.sub(r'[()（）]', '', raw).strip()
+
+
+def _handle_image_message(msg_data: dict, from_user: str, message_log_id: int = None) -> str:
+    """处理企业微信图片消息 - OCR识别消费截图并自动记账"""
+    import uuid as _uuid
+    import requests as _req
+    from services.ocr import ocr_image, parse_screenshot, is_ocr_available, UPLOAD_DIR
+
+    media_id = msg_data.get('MediaId', '')
+    pic_url = msg_data.get('PicUrl', '')
+    msg_id = msg_data.get('MsgId', '')
+
+    if not media_id and not pic_url:
+        return '❌ 未获取到图片信息，请重新发送截图'
+
+    # 消息去重：同一 MsgId 只处理一次
+    if msg_id:
+        if msg_id in _processed_image_ids:
+            logger.info(f"图片消息去重跳过: MsgId={msg_id}")
+            return ''
+        _processed_image_ids.add(msg_id)
+        if len(_processed_image_ids) > 1000:
+            _processed_image_ids.clear()
+
+    if not is_ocr_available():
+        logger.warning(f"用户 {from_user} 发送了截图，但OCR引擎不可用")
+        return (
+            '📷 已收到您的截图，但 OCR 识别功能暂未安装\n'
+            '请联系管理员安装 ddddocr：pip install ddddocr\n\n'
+            '您也可以尝试手动输入记账命令，格式：类别 金额 备注'
+        )
+
+    # 下载图片 — 优先使用 PicUrl（CDN直链，无需API代理）
+    ext = 'jpg'
+    saved_name = f"wecom_{_uuid.uuid4().hex}.{ext}"
+    saved_path = os.path.join(UPLOAD_DIR, saved_name)
+
+    download_ok = False
+    if pic_url:
+        logger.info(f"从 PicUrl 下载图片: {pic_url[:64]}... 保存到 {saved_path}")
+        try:
+            resp = _req.get(pic_url, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 0:
+                with open(saved_path, 'wb') as f:
+                    f.write(resp.content)
+                logger.info(f"PicUrl 图片下载成功: size={len(resp.content)}")
+                download_ok = True
+            else:
+                logger.warning(f"PicUrl 下载失败: status={resp.status_code}")
+        except Exception as e:
+            logger.warning(f"PicUrl 下载异常，尝试 MediaId 下载: {e}")
+
+    if not download_ok and media_id:
+        logger.info(f"从 MediaId 下载图片: media_id={media_id[:16]}...")
+        download_ok = wecom_client.get_media(media_id, saved_path)
+    if not download_ok:
+        return '❌ 图片下载失败，请重新发送截图'
+
+    try:
+        # OCR 识别
+        logger.info(f"开始 OCR 识别: {saved_path}")
+        texts = ocr_image(saved_path)
+        if not texts:
+            return (
+                '📷 未能识别到文字\n'
+                '请确保截图清晰，或手动发送：\n'
+                '类别 金额 备注\n'
+                '如：餐饮 30 午餐'
+            )
+
+        # 解析截图
+        parsed = parse_screenshot(texts)
+        bill_type = parsed.get('bill_type', 'expense')
+        amount = parsed.get('amount')
+        transaction_time = parsed.get('transaction_time')
+        merchant = parsed.get('merchant', '')
+        account_name = parsed.get('account_name', '')
+
+        logger.info(f"OCR 解析结果: type={bill_type}, amount={amount}, "
+                     f"time={transaction_time}, merchant={merchant}, account={account_name}")
+
+        # ── 消息1：识别结果 ──
+        type_label = '支出' if bill_type == 'expense' else '收入'
+        lines = []
+
+        if amount:
+            lines.append(f'✅ 💵 金额：¥{amount:.2f}')
+        else:
+            lines.append('❌ ❌ 💵 金额：未识别')
+        if merchant:
+            lines.append(f'✅ 🏪 商户：{merchant}')
+        else:
+            lines.append('❌ ❌ 🏪 商户：未识别')
+        if account_name:
+            lines.append(f'✅ 🏦 账户：{account_name}')
+        else:
+            lines.append('❌ ❌ 🏦 账户：未识别')
+        if transaction_time:
+            lines.append(f'✅ 🕐 时间：{transaction_time}')
+        else:
+            lines.append('❌ ❌ 🕐 时间：未识别')
+
+        cmd = merchant or ('其他支出' if bill_type == 'expense' else '其他收入')
+        cmd += f' {amount:.2f}' if amount else ' 金额'
+        if account_name:
+            # 清理账户名：OCR 可能漏掉括号，将尾部数字还原为 (卡号)
+            acct_clean = _clean_account_name(account_name)
+            cmd += f' @{acct_clean}'
+        lines += ['', f'📝 {cmd}', '', f'（商户→科目、账户→别名自动匹配）']
+
+        # 先发送识别结果消息
+        wecom_client.send_text_message('\n'.join(lines), from_user)
+
+        if not amount:
+            return ''
+
+        # ── 消息2：自动入账 ──
+        # 构造标准记账文本，走 handle_text_message 复用完整入账逻辑
+        try:
+            cat_name = merchant or ('其他支出' if bill_type == 'expense' else '其他收入')
+            cmd_text = f"{cat_name} {amount:.2f}"
+            if account_name:
+                # 清理账户名：OCR 可能漏掉括号，将尾部数字还原为 (卡号)
+                acct_clean = _clean_account_name(account_name)
+                cmd_text += f' @{acct_clean}'
+
+            result_msg = message_handler.handle_text_message(
+                cmd_text, from_user, message_log_id=message_log_id
+            )
+
+            if result_msg:
+                wecom_client.send_text_message(result_msg, from_user)
+
+            # 记账成功 → 将图片移至持久目录，以交易 UUID 命名
+            last_tx = message_handler._last_transaction.get(
+                message_handler._key(from_user))
+            tx_uuid = last_tx.get('uuid') if last_tx else None
+            if tx_uuid and os.path.exists(saved_path):
+                from services.ocr import IMAGES_DIR
+                dest = os.path.join(IMAGES_DIR, f'ts_{tx_uuid}.jpg')
+                os.rename(saved_path, dest)
+                logger.info(f"OCR 图片已持久化: {dest}")
+        except Exception as txn_e:
+            logger.error(f"OCR 自动入账异常: {txn_e}")
+            wecom_client.send_text_message(
+                '⚠️ 自动入账异常，请直接发送上面命令手动记账', from_user)
+
+        return ''
+
+    except Exception as ocr_e:
+        logger.error(f"OCR 识别异常: {ocr_e}", exc_info=True)
+        wecom_client.send_text_message(
+            '📷 OCR 识别异常，请重新发送清晰的截图', from_user)
+        return ''
 
 
 def _process_message(msg_data: dict) -> str:
@@ -81,6 +249,12 @@ def _process_message(msg_data: dict) -> str:
         except Exception as _e:
             logger.error(f"[回调] ❌ 处理文本消息异常: {_e}", exc_info=True)
             reply_content = f'抱歉，处理消息时出现错误: {_e}'
+    elif msg_type == 'image':
+        try:
+            reply_content = _handle_image_message(msg_data, from_user, message_log_id)
+        except Exception as _e:
+            logger.error(f"[回调] ❌ 处理图片消息异常: {_e}", exc_info=True)
+            reply_content = f'抱歉，处理图片消息时出现错误: {_e}'
     elif msg_type == 'event':
         event = msg_data.get('Event', '')
         event_key = msg_data.get('EventKey', '')

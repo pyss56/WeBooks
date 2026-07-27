@@ -19,6 +19,16 @@ from scheduler import SummaryScheduler
 from version import __version__, __app_name__, __description__
 from auth import login_required, init_auth_routes
 
+# 公开路径前缀注册表 — 无需登录、无入口编码前缀限制也可访问
+# 新增公开路由时在此添加前缀，会同时应用于 _no_prefix 检查
+PUBLIC_PATH_PREFIXES = [
+    '/',  # 首页（@login_required 处理登录跳转）
+    '/qywx/', '/s/t/', '/s/go/', '/s/cb/',
+    '/tx/', '/ts_img/',
+    '/api/transactions/by-uuid/',
+    '/static/', '/manifest.json', '/sw.js',
+]
+
 # 初始化
 app = Flask(__name__)
 config = get_config()
@@ -37,8 +47,15 @@ if _entry_code:
         - 未登录用户：仅公开路径可访问（login、企微回调、消息卡片页等），其他一律跳转
         - 有前缀时剥离前缀，拦截 302 给 Location 补回前缀
         """
-        # 无前缀也可访问的路径（企微回调、消息卡片跳转、PWA 资源）
-        _no_prefix = ('/qywx/', '/s/t/', '/s/go/', '/s/cb/', '/tx/', '/static/', '/manifest.json', '/sw.js')
+        # 无前缀也可访问的路径（从 PUBLIC_PATH_PREFIXES 自动加载）
+        _no_prefix = tuple(PUBLIC_PATH_PREFIXES)
+
+        @staticmethod
+        def _path_matches_prefix(path: str, prefix: str) -> bool:
+            """检查 path 是否匹配前缀（同时处理有无尾随斜杠）"""
+            if prefix == '/':
+                return path == '/' or path == _entry_prefix
+            return path.startswith(prefix) or path.startswith(prefix.rstrip('/') + '/') or path == prefix.rstrip('/')
         # 需前缀但无需登录的路径
         _no_auth = ('/login', '/logout')
 
@@ -81,7 +98,7 @@ if _entry_code:
                 # 未登录 + 有前缀 → 仅 no_auth/no_prefix 路径放行
                 stripped = environ['PATH_INFO']
                 if any(stripped.startswith(p) for p in self._no_auth) or \
-                   any(stripped.startswith(p) for p in self._no_prefix):
+                   any(self._path_matches_prefix(stripped, p) for p in self._no_prefix):
                     return self._call_with_rewrite(environ, start_response)
                 # 未登录 + 有前缀 + 非公开路径 → 跳转登录页
                 qs = environ.get('QUERY_STRING', '')
@@ -95,7 +112,7 @@ if _entry_code:
                     # 已登录 + 无前缀 → 直接放行
                     return self.wsgi_app(environ, start_response)
                 # 未登录 + 无前缀 → 仅 no_prefix 路径放行（login 必须有前缀）
-                if any(path.startswith(p) for p in self._no_prefix):
+                if any(self._path_matches_prefix(path, p) for p in self._no_prefix):
                     return self.wsgi_app(environ, start_response)
 
             # 无前缀 + 未登录 + 非公开路径 → 跳转外部地址
@@ -249,6 +266,7 @@ from routes.summary_view import bp as bp_summary_view
 from routes.menus import bp as bp_menus
 from routes.roles import bp as bp_roles
 from routes.ts_rules import bp as bp_ts_rules
+from routes.ocr import bp as bp_ocr
 
 app.register_blueprint(bp_transactions)
 app.register_blueprint(bp_accounts)
@@ -262,6 +280,7 @@ app.register_blueprint(bp_summary_view)
 app.register_blueprint(bp_menus)
 app.register_blueprint(bp_roles)
 app.register_blueprint(bp_ts_rules)
+app.register_blueprint(bp_ocr)
 
 # 注入 scheduler 依赖到 scheduler blueprint
 _TASK_FUNCS = {
@@ -284,8 +303,7 @@ def inject_globals():
     if is_admin:
         menus = [m for m in get_all_menus() if m.get('is_active')]
     else:
-        role_codes = session.get('role_codes', [])
-        menus = get_menus_for_user(role_codes)
+        menus = get_menus_for_user(session.get('role_codes', []))
     # 构建菜单树（一级和二级）
     menu_tree = []
     for m in menus:
@@ -309,11 +327,13 @@ def inject_globals():
 def manifest_json():
     """PWA Web App Manifest"""
     from version import __app_name__, __description__, __version__
+    # 有入口编码时，start_url 带上前缀，避免退出后跳转到重定向地址
+    start_url = f"/{config.WEB_ENTRY_CODE}/" if config.WEB_ENTRY_CODE else "/"
     manifest = {
         "name": __app_name__,
         "short_name": __app_name__,
         "description": __description__,
-        "start_url": "/",
+        "start_url": start_url,
         "display": "standalone",
         "background_color": "#f5f5f5",
         "theme_color": "#07c160",
@@ -338,12 +358,16 @@ def manifest_json():
 
 @app.route('/sw.js')
 def service_worker():
-    """PWA Service Worker"""
+    """PWA Service Worker（动态注入入口编码前缀）"""
     from flask import make_response
     sw_path = os.path.join(app.root_path, 'static', 'sw.js')
     if os.path.exists(sw_path):
         with open(sw_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        # 注入 WEB_ENTRY_CODE，使 SW 缓存带前缀的路径
+        entry = config.WEB_ENTRY_CODE or ''
+        content = content.replace('/* __ENTRY_CODE__ */', f'"{entry}"')
+        content = content.replace('/* __ENTRY_PREFIX__ */', f'"/{entry}"' if entry else '""')
         resp = make_response(content)
         resp.headers['Content-Type'] = 'application/javascript; charset=utf-8'
         resp.headers['Service-Worker-Allowed'] = '/'
@@ -439,6 +463,10 @@ if __name__ == '__main__':
     logger.info("账本: 本地SQLite")
     logger.info("=" * 50)
 
+    # 依赖检查（必需 + 可选自动安装）
+    from check_deps import run_all as check_deps
+    check_deps()
+
     # 初始化数据库
     from db import init_db
     init_db()
@@ -462,4 +490,4 @@ if __name__ == '__main__':
     # 启动Flask
     port = int(os.getenv('PORT', 5001))
     debug = os.getenv('FLASK_DEBUG', '0') == '1'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)

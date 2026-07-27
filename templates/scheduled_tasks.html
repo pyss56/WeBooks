@@ -411,37 +411,58 @@ function renderJobs() {
         return;
     }
     let html_r = '';
+    const _mobile = window.innerWidth < 769;
     for (const job of filtered) {
         const enabled = job.enabled !== false;
         const nextRun = job.next_run || '未调度';
-        html_r += '<div class="scheduler-card">';
-        html_r += '  <div class="header">';
-        html_r += '    <div class="name">' + escapeHtml(job.name) + '<span class="badge ' + (enabled ? 'badge-running' : 'badge-stopped') + '">' + (enabled ? '运行中' : '已暂停') + '</span></div>';
-        html_r += '  </div>';
-        html_r += '  <div class="info">';
+        if (_mobile) {
+            html_r += '<div class="scheduler-card" style="padding:0;">';
+            html_r += '  <div class="card-swipe-wrap" style="border-radius:12px;">';
+            html_r += '    <div class="card-swipe-inner">';
+            html_r += '      <div style="flex:1 0 100%;width:100%;padding:20px 24px;">';
+        } else {
+            html_r += '<div class="scheduler-card">';
+        }
+        html_r += '        <div class="header">';
+        html_r += '          <div class="name">' + escapeHtml(job.name) + '<span class="badge ' + (enabled ? 'badge-running' : 'badge-stopped') + '">' + (enabled ? '运行中' : '已暂停') + '</span></div>';
+        html_r += '        </div>';
+        html_r += '        <div class="info">';
         let rangeText = '';
         try { const rc = JSON.parse(job.range_config || '{}'); rangeText = _dictRange[rc.type] || rc.type || ''; } catch(e) {}
-        html_r += '    <span>📋 ' + escapeHtml(_dictType[job.task_type] || job.task_type || '-') + '</span>';
-        if (rangeText) html_r += '    <span>📅 范围: ' + escapeHtml(rangeText) + '</span>';
-        html_r += '    <span>⏱ ' + escapeHtml(job.cron_desc || '-') + '</span>';
-        html_r += '    <span>⏰ 下次执行: ' + escapeHtml(nextRun) + '</span>';
-        if (job.filter_user) html_r += '    <span>🔍 筛选: ' + escapeHtml(job.filter_user) + '</span>';
-        if (job.push_user_display) html_r += '    <span>📨 推送: ' + escapeHtml(job.push_user_display) + '</span>';
-        if (job.per_user_push) html_r += '    <span>🔀 分别推送</span>';
-        html_r += '  </div>';
-        html_r += '  <div class="actions">';
-        html_r += '    <button class="btn btn-outline btn-sm" onclick="editJob(\'' + job.id + '\')">✏️ 编辑</button>';
-        html_r += '    <button class="btn btn-primary btn-sm" onclick="runNow(\'' + job.id + '\')">▶️ 立即执行</button>';
-        if (enabled) {
-            html_r += '    <button class="btn btn-outline btn-sm" onclick="toggleJob(\'' + job.id + '\', false)">⏸ 暂停</button>';
+        html_r += '          <span>📋 ' + escapeHtml(_dictType[job.task_type] || job.task_type || '-') + '</span>';
+        if (rangeText) html_r += '          <span>📅 范围: ' + escapeHtml(rangeText) + '</span>';
+        html_r += '          <span>⏱ ' + escapeHtml(job.cron_desc || '-') + '</span>';
+        html_r += '          <span>⏰ 下次执行: ' + escapeHtml(nextRun) + '</span>';
+        if (job.filter_user) html_r += '          <span>🔍 筛选: ' + escapeHtml(job.filter_user) + '</span>';
+        if (job.push_user_display) html_r += '          <span>📨 推送: ' + escapeHtml(job.push_user_display) + '</span>';
+        if (job.per_user_push) html_r += '          <span>🔀 分别推送</span>';
+        html_r += '        </div>';
+        if (_mobile) {
+            html_r += '      </div>';
+            html_r += '      <div class="card-actions" style="padding:20px 10px;">';
         } else {
-            html_r += '    <button class="btn btn-primary btn-sm" onclick="toggleJob(\'' + job.id + '\', true)">▶️ 启用</button>';
+            html_r += '  <div class="actions">';
         }
-        html_r += '    <button class="btn btn-danger btn-sm" onclick="deleteJob(\'' + job.id + '\', \'' + job.name.replace(/'/g, "\\'") + '\')">🗑 删除</button>';
-        html_r += '  </div>';
+        html_r += '        <button class="btn btn-outline btn-sm" onclick="editJob(\'' + job.id + '\')">✏️' + (!_mobile ? ' 编辑' : '') + '</button>';
+        html_r += '        <button class="btn btn-primary btn-sm" onclick="runNow(\'' + job.id + '\')">▶️' + (!_mobile ? ' 立即执行' : '') + '</button>';
+        if (enabled) {
+            html_r += '        <button class="btn btn-outline btn-sm" onclick="toggleJob(\'' + job.id + '\', false)">⏸' + (!_mobile ? ' 暂停' : '') + '</button>';
+        } else {
+            html_r += '        <button class="btn btn-primary btn-sm" onclick="toggleJob(\'' + job.id + '\', true)">▶️' + (!_mobile ? ' 启用' : '') + '</button>';
+        }
+        html_r += '        <button class="btn btn-danger btn-sm" onclick="deleteJob(\'' + job.id + '\', \'' + job.name.replace(/'/g, "\\'") + '\')">🗑' + (!_mobile ? ' 删除' : '') + '</button>';
+        if (_mobile) {
+            html_r += '      </div>';
+            html_r += '    </div>';
+            html_r += '    <div class="swipe-hint"></div>';
+            html_r += '  </div>';
+        } else {
+            html_r += '  </div>';
+        }
         html_r += '</div>';
     }
     container.innerHTML = html + html_r;
+    if (_mobile) { initSwipeCards(container); }
 }
 
 function applyFilter() {

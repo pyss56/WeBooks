@@ -45,4 +45,6 @@ services:
       - WEB_ENTRY_REDIRECT=https://example.com
       # 企业微信 OAuth 登录（汇总图表免验证码）
       - WECOM_OAUTH_ENABLED=false
+      # OCR 截图识别依赖（轻量版 ddddocr ~30MB）
+      # - PIP_AUTO_INSTALL=ddddocr
 

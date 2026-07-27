@@ -213,6 +213,7 @@ function renderTab(type) {
     const cats = getCategoriesByType(type);
     document.getElementById('tabInfo').textContent = TYPE_ICONS[type] + ' ' + TYPE_LABELS[type] + '科目（共 ' + countAll(cats) + ' 个）';
     const container = document.getElementById('categoryList');
+    const _mobile = window.innerWidth < 769;
     let html = '';
     if (cats.length === 0) {
         html = '<div class="empty-msg">暂无' + TYPE_LABELS[type] + '科目，点击上方按钮新增</div>';
@@ -223,14 +224,27 @@ function renderTab(type) {
             const pi = parent.icon || '1';
             const pIconMap = ALL_ICONS.find(i => i.id === pi);
             const pCss = pIconMap ? pIconMap.css : 'las la-folder';
-            html += '<div class="parent-row" data-cat-id="' + parent.id + '" draggable="true" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)">';
-            html += '<span class="drag-handle">⠿</span>';
-            html += '<span class="cat-name"><i class="' + pCss + '" style="color:#' + pc + ';width:18px;text-align:center;"></i> ' + parent.name + ' <span class="level-badge l1">一级</span>' + (parent.hidden ? '<span style="font-size:10px;color:#bbb;margin-left:4px;">👁️‍🗨️ 隐藏</span>' : '') + '</span>';
-            if (parent.comment) html += '<span class="cat-desc">📝 ' + escapeHtml(parent.comment) + '</span>';
-            html += '<div class="actions">';
-            html += '<button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + parent.id + '\')">✏️</button>';
-            html += '<button class="btn btn-danger btn-sm" onclick="openDeleteModal(\'' + parent.id + '\')">🗑️</button>';
-            html += '</div></div>';
+            var pName = '<i class="' + pCss + '" style="color:#' + pc + ';width:18px;text-align:center;"></i> ' + parent.name + ' <span class="level-badge l1">一级</span>' + (parent.hidden ? '<span style="font-size:10px;color:#bbb;margin-left:4px;">👁️‍🗨️ 隐藏</span>' : '');
+            var pActions = [
+                '<button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + parent.id + '\')">✏️</button>',
+                '<button class="btn btn-danger btn-sm" onclick="openDeleteModal(\'' + parent.id + '\')">🗑️</button>',
+            ];
+            if (_mobile) {
+                html += '<div class="card-swipe-wrap" style="border-radius:8px;margin-bottom:6px;"><div class="card-swipe-inner">';
+                html += '<div style="flex:1 0 100%;width:100%;"><div class="parent-row" style="border:none;padding:10px 16px;" data-cat-id="' + parent.id + '">';
+                html += '<span class="drag-handle">⠿</span>';
+                html += '<span class="cat-name">' + pName + '</span>';
+                if (parent.comment) html += '<span class="cat-desc">📝 ' + escapeHtml(parent.comment) + '</span>';
+                html += '</div></div>';
+                html += '<div class="card-actions" style="padding:10px;">' + pActions.join('') + '</div></div>';
+                html += '<div class="swipe-hint"></div></div>';
+            } else {
+                html += '<div class="parent-row" data-cat-id="' + parent.id + '" draggable="true" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)">';
+                html += '<span class="drag-handle">⠿</span>';
+                html += '<span class="cat-name">' + pName + '</span>';
+                if (parent.comment) html += '<span class="cat-desc">📝 ' + escapeHtml(parent.comment) + '</span>';
+                html += '<div class="actions">' + pActions.join('') + '</div></div>';
+            }
             if (subs.length > 0) {
                 html += '<div class="child-list">';
                 for (const child of subs) {
@@ -238,19 +252,32 @@ function renderTab(type) {
                     const ci = child.icon || '1';
                     const cIconMap = ALL_ICONS.find(i => i.id === ci);
                     const cCss = cIconMap ? cIconMap.css : 'las la-circle';
-                    html += '<div class="child-item" data-cat-id="' + child.id + '" draggable="true" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)">';
-                    html += '<div class="name"><span class="sub-dot">└─</span> <span class="drag-handle" style="margin-right:4px;">⠿</span><i class="' + cCss + '" style="color:#' + cc + ';width:16px;text-align:center;font-size:13px;"></i> ' + child.name + ' <span class="level-badge l2">二级</span>' + (child.hidden ? '<span style="font-size:10px;color:#bbb;margin-left:4px;">👁️‍🗨️ 隐藏</span>' : '') + '</div>';
-                    if (child.comment) html += '<span class="desc">📝 ' + escapeHtml(child.comment) + '</span>';
-                    html += '<div class="actions">';
-                    html += '<button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + child.id + '\')">✏️</button>';
-                    html += '<button class="btn btn-danger btn-sm" onclick="openDeleteModal(\'' + child.id + '\')">🗑️</button>';
-                    html += '</div></div>';
+                    var cName = '<span class="sub-dot">└─</span> <span class="drag-handle" style="margin-right:4px;">⠿</span><i class="' + cCss + '" style="color:#' + cc + ';width:16px;text-align:center;font-size:13px;"></i> ' + child.name + ' <span class="level-badge l2">二级</span>' + (child.hidden ? '<span style="font-size:10px;color:#bbb;margin-left:4px;">👁️‍🗨️ 隐藏</span>' : '');
+                    var cActions = [
+                        '<button class="btn btn-outline btn-sm" onclick="openEditModal(\'' + child.id + '\')">✏️</button>',
+                        '<button class="btn btn-danger btn-sm" onclick="openDeleteModal(\'' + child.id + '\')">🗑️</button>',
+                    ];
+                    if (_mobile) {
+                        html += '<div class="card-swipe-wrap" style="border-radius:8px;margin-bottom:4px;margin-left:16px;"><div class="card-swipe-inner">';
+                        html += '<div style="flex:1 0 100%;width:100%;"><div class="child-item" style="border:none;padding:8px 16px 8px 36px;">';
+                        html += '<div class="name">' + cName + '</div>';
+                        if (child.comment) html += '<span class="desc">📝 ' + escapeHtml(child.comment) + '</span>';
+                        html += '</div></div>';
+                        html += '<div class="card-actions" style="padding:10px;">' + cActions.join('') + '</div></div>';
+                        html += '<div class="swipe-hint"></div></div>';
+                    } else {
+                        html += '<div class="child-item" data-cat-id="' + child.id + '" draggable="true" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" ondragover="onDragOver(event)" ondrop="onDrop(event)">';
+                        html += '<div class="name">' + cName + '</div>';
+                        if (child.comment) html += '<span class="desc">📝 ' + escapeHtml(child.comment) + '</span>';
+                        html += '<div class="actions">' + cActions.join('') + '</div></div>';
+                    }
                 }
                 html += '</div>';
             }
         }
     }
     container.innerHTML = html;
+    if (_mobile) initSwipeCards(container);
 }
 
 function countAll(cats) {

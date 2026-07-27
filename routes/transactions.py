@@ -532,13 +532,31 @@ def add_transaction_page():
     user_code = session.get('user_code', '')
     username = session.get('username', '')
 
-    # 获取当前用户的默认账户
+    # 获取当前用户的默认账户和模板
     default_account_id = ''
+    default_tx_type = 'expense'
     if user_code:
-        from db import get_user_account
+        from db import get_user_account, get_connection
         default_account_id = get_user_account(user_code, direction='expense') or ''
         if not default_account_id:
             default_account_id = get_user_account(user_code, direction='income') or ''
+        # 读取默认交易类型
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT default_tx_type, account_id, income_account_id FROM user_default_account WHERE user_code=?",
+                (user_code,)
+            ).fetchone()
+            if row:
+                default_tx_type = row['default_tx_type'] or 'expense'
+                if default_tx_type == 'expense':
+                    aid = row['account_id'] or ''
+                    if aid: default_account_id = aid
+                elif default_tx_type == 'income':
+                    aid = row['income_account_id'] or row['account_id'] or ''
+                    if aid: default_account_id = aid
+        finally:
+            conn.close()
 
     # 获取启用用户列表
     users = [u for u in get_users(status=1) if not u.get('deleted_at')]
@@ -556,6 +574,7 @@ def add_transaction_page():
         session_user_code=user_code,
         session_username=username,
         default_account_id=default_account_id,
+        default_tx_type=default_tx_type,
     )
 
 
@@ -595,12 +614,35 @@ def api_transactions_create():
     # 确定收支方向
     if bill_type == 'income':
         transaction_type = 2
+    elif bill_type == 'transfer':
+        transaction_type = 4  # transfer
     else:
         transaction_type = 3  # expense
 
     # 调用核心记账逻辑
     from books.client import BookkeepingClient
     bk = BookkeepingClient()
+
+    # 转账处理
+    if bill_type == 'transfer':
+        to_account_id = data.get('to_account_id', '').strip()
+        if not to_account_id:
+            return jsonify({'success': False, 'message': '请选择转入账户'}), 400
+        result = bk.create_transfer(
+            from_account_id=account_id,
+            to_account_id=to_account_id,
+            amount=amount_val,
+            comment=comment,
+            transaction_time=transaction_time,
+            created_by=created_by,
+            user_code=user_code,
+            source='web',
+            source_user=created_by,
+        )
+        if result.get('success'):
+            return jsonify({'success': True, 'message': '转账成功', 'data': result.get('result')})
+        else:
+            return jsonify({'success': False, 'message': result.get('errorMessage', '转账失败')}), 500
 
     # 查找科目ID
     from db import get_connection
@@ -637,3 +679,42 @@ def api_transactions_create():
         return jsonify({'success': True, 'message': '交易创建成功', 'data': result.get('result')})
     else:
         return jsonify({'success': False, 'message': result.get('errorMessage', '创建交易失败')}), 500
+
+
+@bp.route('/api/transactions/parse-notice', methods=['POST'])
+@login_required
+def api_parse_notice():
+    """解析交易通知文本（银行短信等），返回结构化交易信息"""
+    data = request.get_json() or {}
+    text = data.get('text', '').strip()
+    if not text:
+        return jsonify({'success': False, 'message': '请输入文本'}), 400
+    try:
+        from services.transaction import parse_transaction_notice_text
+        from db import resolve_alias
+        from services.ocr import resolve_and_match
+        result = parse_transaction_notice_text(text)
+        if result.get('success'):
+            merchant = result.get('merchant', '')
+            account_hint = result.get('account_hint', '')
+            result['merchant'] = merchant or ''
+            result['account_name'] = account_hint or ''
+            # 统一匹配：别名→字符匹配
+            if merchant:
+                r = resolve_and_match(merchant, 'category')
+                if r.get('resolved_id'):
+                    result['resolved_category_id'] = r['resolved_id']
+                    result['resolved_category_name'] = r['resolved_name']
+            if account_hint:
+                r = resolve_and_match(account_hint, 'account')
+                if r.get('resolved_id'):
+                    result['resolved_account_id'] = r['resolved_id']
+                    result['resolved_account_name'] = r['resolved_name']
+            # 格式化时间
+            if result.get('transaction_time'):
+                result['transaction_time'] = result['transaction_time'].strftime('%Y-%m-%d %H:%M:%S')
+            return jsonify(result)
+        return jsonify({'success': False, 'message': result.get('message', '未识别')})
+    except Exception as e:
+        logger.error(f"解析交易通知异常: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500

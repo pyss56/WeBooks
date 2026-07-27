@@ -20,6 +20,13 @@ RUN pip install --no-cache-dir \
     --trusted-host ${PIP_TRUSTED_HOST} \
     -r requirements.txt
 
+# 离线 wheel 包（可选 — 有则安装）
+COPY wheels/ /app/wheels/
+RUN if ls /app/wheels/*.whl 2>/dev/null; then \
+        pip install --no-cache-dir --find-links /app/wheels --no-index /app/wheels/*.whl 2>&1 || \
+        echo "⚠️ 部分离线 wheel 安装失败（不影响核心功能）"; \
+    fi
+
 # 复制源码
 COPY . .
 

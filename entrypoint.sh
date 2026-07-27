@@ -10,6 +10,11 @@ echo "=================================================="
 
 echo "数据库: 本地 SQLite (data/data.db)"
 
+# 依赖检查（可选依赖自动安装）
+echo ""
+echo "正在检查依赖..."
+python check_deps.py
+
 # 启动应用
 echo ""
 echo "启动应用..."

@@ -2,12 +2,15 @@
 # -*- coding: utf-8 -*-
 """企业微信API客户端"""
 import json
+import logging
 import time
 from typing import Optional
 
 import requests
 
 from config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 class WeComClient:
@@ -193,5 +196,39 @@ class WeComClient:
             logger.error(f"OAuth 获取用户失败: {result}")
             return None
         return result.get('UserId')
+
+    def get_media(self, media_id: str, save_path: str) -> bool:
+        """下载企业微信媒体文件（如图片）到本地
+
+        企业微信临时素材有效期3天，可通过此接口下载。
+        :param media_id: 素材ID（从图片消息的 MediaId 字段获取）
+        :param save_path: 保存路径
+        :return: 是否下载成功
+        """
+        access_token = self._get_access_token()
+        url = f"{self.api_base_url}/cgi-bin/media/get?access_token={access_token}&media_id={media_id}"
+        try:
+            resp = requests.get(url, timeout=30)
+            content_type = resp.headers.get('Content-Type', '')
+            if 'image' in content_type or 'application/octet-stream' in content_type:
+                with open(save_path, 'wb') as f:
+                    f.write(resp.content)
+                logger.info(f"企业微信图片下载成功: media_id={media_id[:16]}... size={len(resp.content)}")
+                return True
+            else:
+                # 企业微信返回了非图片响应（可能是错误信息或重定向等）
+                logger.warning(f"企业微信图片下载失败: media_id={media_id[:16]}... "
+                               f"Content-Type={content_type} size={len(resp.content)}")
+                # 如果是JSON错误，记录下来
+                try:
+                    err = resp.json()
+                    logger.error(f"企业微信图片下载JSON错误: {err}")
+                except Exception:
+                    # 非JSON响应，记录前200字节
+                    logger.error(f"企业微信图片下载响应(非JSON): {resp.content[:200]}")
+                return False
+        except Exception as e:
+            logger.error(f"企业微信图片下载异常: media_id={media_id[:16]}... error={e}")
+            return False
 
 

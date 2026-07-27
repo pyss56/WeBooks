@@ -1,0 +1,133 @@
+/* ── 手机端卡片列表（用户管理、角色管理等） ── */
+
+.card-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
+}
+
+.card-item {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    transition: box-shadow 0.2s;
+}
+.card-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+.card-item .avatar {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: #e8f5e9;
+    color: #2e7d32;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+.card-item .avatar.disabled { background: #f5f5f5; color: #bbb; }
+
+.card-item .info { flex: 1; min-width: 0; }
+.card-item .info .title { font-size: 14px; font-weight: 600; color: #333; }
+.card-item .info .meta { font-size: 12px; color: #999; margin-top: 2px; }
+.card-item .info .tags { font-size: 12px; color: #888; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+
+.card-item .actions { display: flex; gap: 4px; margin-left: 8px; flex-shrink: 0; }
+.card-item .actions .btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
+
+/* ── 左滑显示操作按钮 ── */
+.card-swipe-wrap {
+    overflow: hidden;
+    position: relative;
+    border-radius: 8px;
+    touch-action: pan-y;
+}
+.card-swipe-inner {
+    display: flex;
+    transition: transform 0.25s ease;
+    will-change: transform;
+}
+.card-swipe-inner .card-item {
+    flex: 1 0 100%;
+    min-width: 0;
+    width: 100%;
+    border: 1px solid #eee;
+    border-radius: 8px;
+}
+.card-swipe-inner .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 10px;
+    flex-shrink: 0;
+    background: #f0f0f0;
+    border: 1px solid #eee;
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+}
+.card-swipe-inner .card-actions .btn {
+    padding: 8px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+/* 小提示：右侧露出一点点按钮颜色，提示可滑动 */
+.card-swipe-wrap .swipe-hint {
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 8px;
+    background: linear-gradient(to left, rgba(0,0,0,0.06), transparent);
+    pointer-events: none;
+    border-radius: 0 8px 8px 0;
+}
+
+/* 卡片标签 */
+.tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+}
+.tag-blue { background: #e8f0fe; color: #1a73e8; }
+.tag-green { background: #e8f5e9; color: #2e7d32; }
+.tag-red { background: #fce4ec; color: #c62828; }
+.tag-gray { background: #f5f5f5; color: #999; }
+
+/* 徽章 */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; }
+.badge-yes { background: #e8f5e9; color: #2e7d32; }
+.badge-no { background: #f5f5f5; color: #999; }
+.badge-enabled { background: #e8f5e9; color: #2e7d32; }
+.badge-disabled { background: #fce4ec; color: #c62828; }
+
+/* 角色卡片特殊 */
+.role-card .role-icon {
+    width: 40px; height: 40px;
+    border-radius: 12px;
+    background: #fff3e0;
+    color: #e65100;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+/* 移动端下表格隐藏，卡片显示 */
+@media (min-width: 769px) {
+    .mobile-only { display: none !important; }
+}
+@media (max-width: 768px) {
+    .desktop-only { display: none !important; }
+    .card-section { padding: 16px; }
+    .card-item { padding: 12px 14px; }
+    .card-item .actions { gap: 2px; }
+    .card-item .actions .btn {
+        padding: 6px 8px;
+        font-size: 11px;
+        min-width: 28px;
+        text-align: center;
+    }
+}

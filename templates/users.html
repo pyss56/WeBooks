@@ -68,45 +68,12 @@
 {% endblock %}
 
 {% block extra_style %}
-.user-section {
-    background: #fff;
-    border-radius: 12px;
-    padding: 24px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    margin-bottom: 20px;
-}
-.user-card {
-    display: flex;
-    align-items: center;
-    padding: 14px 16px;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    transition: box-shadow 0.2s;
-}
-.user-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-.user-card .avatar {
-    width: 40px; height: 40px;
-    border-radius: 50%;
-    background: #e8f5e9;
-    color: #2e7d32;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 18px;
-    margin-right: 12px;
-    flex-shrink: 0;
-}
-.user-card .avatar.disabled { background: #f5f5f5; color: #bbb; }
-.user-card .info { flex: 1; min-width: 0; }
-.user-card .info .name { font-size: 14px; font-weight: 600; color: #333; }
-.user-card .info .meta { font-size: 12px; color: #999; margin-top: 2px; }
-.user-card .info .wx-list { font-size: 12px; color: #888; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
-.user-card .info .wx-tag {
+/* wx-tag 保留为 user 页面特有 */
+.wx-tag {
     display: inline-flex; align-items: center; gap: 4px;
     background: #e8f0fe; color: #1a73e8; padding: 1px 8px;
     border-radius: 10px; font-size: 11px;
 }
-.user-card .actions { display: flex; gap: 4px; margin-left: 8px; }
-.badge-enabled { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#e8f5e9; color:#2e7d32; }
-.badge-disabled { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#fce4ec; color:#c62828; }
 {% endblock %}
 
 {% block extra_script %}
@@ -120,52 +87,80 @@ async function loadUsers() {
             return;
         }
         const users = data.data || [];
+        const mobile = window.innerWidth < 769;
         let html = '<div class="toolbar"><button class="btn btn-primary" onclick="showAddUserModal()">➕ 新建用户</button></div>';
         if (users.length === 0) {
             html += '<div class="empty-msg">暂无用户</div>';
         } else {
-            for (const u of users) {
+            function renderCard(u) {
                 const disabled = u.status === 0;
                 const sourceusers = u.sourceusers || [];
-                html += '<div class="user-section">';
-                html += '<div class="user-card">';
-                html += '  <div class="avatar' + (disabled ? ' disabled' : '') + '">' + (disabled ? '🚫' : '👤') + '</div>';
-                html += '  <div class="info">';
-                html += '    <div class="name">' + escapeHtml(u.name) + ' <span style="font-size:11px;color:#999;font-weight:400;">code: ' + escapeHtml(u.code) + '</span>';                html +=       (u.is_admin ? ' <span style="display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;background:#e8f0fe;color:#1a73e8;font-weight:600;">管理员</span>' : '');                html += '      ' + (disabled ? '<span class="badge-disabled">已停用</span>' : '<span class="badge-enabled">启用</span>');
-                html += '    </div>';
+                let card = '<div class="card-section">';
+                if (mobile) {
+                    card += '<div class="card-swipe-wrap"><div class="card-swipe-inner">';
+                }
+                card += '<div class="card-item">';
+                card += '  <div class="avatar' + (disabled ? ' disabled' : '') + '">' + (disabled ? '🚫' : '👤') + '</div>';
+                card += '  <div class="info">';
+                card += '    <div class="title">' + escapeHtml(u.name) + ' <span style="font-size:11px;color:#999;font-weight:400;">code: ' + escapeHtml(u.code) + '</span>';                card +=       (u.is_admin ? ' <span style="display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;background:#e8f0fe;color:#1a73e8;font-weight:600;">管理员</span>' : '');                card += '      ' + (disabled ? '<span class="badge badge-disabled">已停用</span>' : '<span class="badge badge-enabled">启用</span>');
+                card += '    </div>';
                 if (sourceusers.length > 0) {
-                    html += '    <div class="wx-list">';
+                    card += '    <div class="tags">';
                     for (const w of sourceusers) {
                         const su = typeof w === 'string' ? w : w.source_user;
                         const src = typeof w === 'string' ? 'wecom' : (w.source || 'wecom');
                         const pushOn = w.push_enabled === true;
                         const srcLabel = {wecom: '企业微信', dingtalk: '钉钉'}[src] || src;
-                        html += `      <span class="wx-tag" style="position:relative;">`;
-                        html += `        💬 ${escapeHtml(su)} <span style="font-size:10px;color:#999;">(${escapeHtml(srcLabel)})</span>`;
-                        html += `        <span onclick="togglePushEnabled('${escapeHtml(u.code)}','${escapeHtml(su)}','${escapeHtml(src)}',${!pushOn})" style="cursor:pointer;font-size:10px;margin-left:3px;${pushOn?'color:#07c160;':'color:#999;'}" title="点击切换推送状态">📨${pushOn?'ON':'OFF'}</span>`;
-                        html += `        <a href="#" onclick="return unbindWx('${escapeHtml(su)}','${escapeHtml(src)}','${escapeHtml(u.name)}')" style="color:#c62828;text-decoration:none;font-size:12px;margin-left:2px;" title="解绑">✕</a>`;
-                        html += `      </span>`;
+                        card += `      <span class="tag tag-blue" style="position:relative;">`;
+                        card += `        💬 ${escapeHtml(su)} <span style="font-size:10px;color:#999;">(${escapeHtml(srcLabel)})</span>`;
+                        card += `        <span onclick="togglePushEnabled('${escapeHtml(u.code)}','${escapeHtml(su)}','${escapeHtml(src)}',${!pushOn})" style="cursor:pointer;font-size:10px;margin-left:3px;${pushOn?'color:#07c160;':'color:#999;'}" title="点击切换推送状态">📨${pushOn?'ON':'OFF'}</span>`;
+                        card += `        <a href="#" onclick="return unbindWx('${escapeHtml(su)}','${escapeHtml(src)}','${escapeHtml(u.name)}')" style="color:#c62828;text-decoration:none;font-size:12px;margin-left:2px;" title="解绑">✕</a>`;
+                        card += `      </span>`;
                     }
-                    html += '    </div>';
+                    card += '    </div>';
                 } else {
-                    html += '    <div class="meta">未绑定平台账号</div>';
+                    card += '    <div class="meta">未绑定平台账号</div>';
                 }
-                html += '  </div>';
-                html += '  <div class="actions">';
-                html += `    <button class="btn btn-outline btn-sm" onclick="showBindModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="绑定平台账号">🔗</button>`;
-                html += `    <button class="btn btn-outline btn-sm" onclick="setPassword('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="设置密码">🔑</button>`;
-                html += `    <button class="btn btn-outline btn-sm" onclick="showUserRolesModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="分配角色">👥</button>`;
-                if (disabled) {
-                    html += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',1)" title="启用">▶️</button>`;
-                } else {
-                    html += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',0)" title="停用">⏸️</button>`;
+                card += '  </div>';
+                if (!mobile) {
+                    card += '  <div class="actions">';
+                    card += `    <button class="btn btn-outline btn-sm" onclick="showBindModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="绑定平台账号">🔗</button>`;
+                    card += `    <button class="btn btn-outline btn-sm" onclick="setPassword('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="设置密码">🔑</button>`;
+                    card += `    <button class="btn btn-outline btn-sm" onclick="showUserRolesModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="分配角色">👥</button>`;
+                    if (disabled) {
+                        card += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',1)" title="启用">▶️</button>`;
+                    } else {
+                        card += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',0)" title="停用">⏸️</button>`;
+                    }
+                    card += `    <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${escapeHtml(u.name)}')" title="删除">🗑️</button>`;
+                    card += '  </div>';
                 }
-                html += `    <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${escapeHtml(u.name)}')" title="删除">🗑️</button>`;
-                html += '  </div>';
-                html += '</div></div>';
+                card += '</div>'; // card-item
+                if (mobile) {
+                    card += '  <div class="card-actions">';
+                    card += `    <button class="btn btn-outline btn-sm" onclick="showBindModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="绑定平台账号">🔗</button>`;
+                    card += `    <button class="btn btn-outline btn-sm" onclick="setPassword('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="设置密码">🔑</button>`;
+                    card += `    <button class="btn btn-outline btn-sm" onclick="showUserRolesModal('${escapeHtml(u.code)}','${escapeHtml(u.name)}')" title="分配角色">👥</button>`;
+                    if (disabled) {
+                        card += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',1)" title="启用">▶️</button>`;
+                    } else {
+                        card += `    <button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',0)" title="停用">⏸️</button>`;
+                    }
+                    card += `    <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${escapeHtml(u.name)}')" title="删除">🗑️</button>`;
+                    card += '    </div>'; // card-actions
+                    card += '  </div>'; // card-swipe-inner
+                    card += '  <div class="swipe-hint"></div>';
+                    card += '</div>'; // card-swipe-wrap
+                }
+                card += '</div>'; // card-section
+                return card;
+            }
+            for (const u of users) {
+                html += renderCard(u);
             }
         }
         container.innerHTML = html;
+        if (mobile) initSwipeCards(container);
     } catch (e) {
         container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
     }
@@ -411,4 +406,9 @@ async function saveUserRoles() {
 }
 
 loadUsers();
+var _userResizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(_userResizeTimer);
+  _userResizeTimer = setTimeout(loadUsers, 300);
+});
 {% endblock %}

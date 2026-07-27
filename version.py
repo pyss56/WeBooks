@@ -3,7 +3,7 @@
 """版本信息"""
 import os
 
-__version__ = "1.2.0-beta"
+__version__ = "1.3.0-beta"
 __app_name__ = "WeBooks"
 __description__ = "企业微信记账助手"
 

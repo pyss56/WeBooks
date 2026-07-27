@@ -11,7 +11,10 @@
 <p class="subtitle">查看每一笔交易记录</p>
 
 <!-- 查询区域 -->
-<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
+<div class="filter-toggle-bar">
+  <button class="btn btn-sm btn-outline" onclick="toggleFilter()" id="filterToggleBtn" style="font-size:12px;">🔍 查询条件</button>
+</div>
+<div id="filterArea" style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
   <div class="filter-grid" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
     <div>
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
@@ -300,6 +303,12 @@
     .table-wrap { display: none; }
     .bills-cards { display: block; }
     .pc-only { display: none !important; }
+    .filter-toggle-bar { display: block; margin-bottom: 12px; }
+    #filterArea { display: none; }
+    #filterArea.show { display: block; }
+  }
+  @media (min-width: 769px) {
+    .filter-toggle-bar { display: none !important; }
   }
 
   @media (max-width: 480px) {
@@ -354,6 +363,13 @@ function resetQuery() {
   document.getElementById('queryTimeTo').value = getMonthEnd();
   document.getElementById('queryReconNo').value = '';
   loadBills(1);
+}
+
+function toggleFilter() {
+  var el = document.getElementById('filterArea');
+  var btn = document.getElementById('filterToggleBtn');
+  el.classList.toggle('show');
+  btn.textContent = el.classList.contains('show') ? '🔍 收起条件' : '🔍 查询条件';
 }
 
 async function loadBills(page) {
@@ -585,7 +601,7 @@ async function submitEdit() {
       amount: finalAmount,
       comment: document.getElementById('editComment').value.trim(),
       source_user: document.getElementById('editSourceUser').value.trim(),
-      bill_time: document.getElementById('editTime').value.trim(),
+      transaction_time: document.getElementById('editTime').value.trim(),
     };
     const acctId = document.getElementById('editAccount').value;
     if (acctId) {

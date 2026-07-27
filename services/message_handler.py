@@ -356,7 +356,61 @@ class MessageHandler:
         return state.get('callback', lambda *_: '请选择')(selected, state)
 
     def _handle_resolve_selection(self, content: str, from_user: str) -> str:
-        return self._handle_selection_input(content, from_user)
+        """处理学科/账户序号选择（旧 _pending_resolve 机制）
+
+        先用 _pending_selection_state (新)，没有则用 _pending_resolve (旧)。
+        """
+        # 优先新的选择状态
+        state = self._pending_selection_state.get(self._key(from_user))
+        if state:
+            return self._handle_selection_input(content, from_user)
+
+        # 回退旧的 _pending_resolve 机制
+        resolve_state = self._pending_resolve.pop(self._key(from_user), None)
+        if not resolve_state:
+            return ''
+
+        idx = int(content) - 1
+        available = resolve_state.get('available', [])
+        pending_data = resolve_state.get('pending_data', {})
+
+        if idx < 0 or idx >= len(available):
+            return '序号超出范围，请重新选择'
+
+        selected = available[idx]
+        resolve_type = resolve_state.get('resolve_type', 'category')
+        result = self.transaction_service.create_from_resolved(
+            pending_data, selected, resolve_type)
+
+        if result.get('success'):
+            msg = result['message']
+            key = self._key(from_user)
+            tx_id = result.get('id', '')
+
+            # 保存别名
+            original_input = pending_data.get('original_input', '') or resolve_state.get('original_input', '')
+            resolved_id = result.get('resolved_id', '')
+            if original_input and resolved_id:
+                from db import add_input_alias
+                ok = add_input_alias(
+                    original_input, resolve_type, resolved_id,
+                    target_name=selected, created_by=from_user)
+                if ok:
+                    msg += f'\n\n✅ 已保存别名：「{original_input}」→「{selected}」'
+
+            msg += '\n\n回复0可撤销'
+
+            self._reply_mode[key] = 'card'
+            self._reply_data[key] = {
+                'card_title': '✅ 记账成功',
+                'card_content': msg,
+            }
+            return msg
+        elif result.get('needs_resolve'):
+            # 账户未匹配 → 继续选择
+            self._pending_resolve[self._key(from_user)] = result
+            return result.get('message', '请选择')
+        return result.get('message', '处理失败')
 
     def _resolve_selection_result(self, from_user: str, selected: str, resolve_type: str,
                                   pending_data: dict, state: dict) -> str:

@@ -15,8 +15,16 @@
     <link rel="shortcut icon" href="/static/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/logo.png">
     <title>{% block title %}后台管理{% endblock %} - {{ app_name }}</title>
-    <link rel="stylesheet" href="https://maxst.icons8.com/vue-static/landings/line-awesome/line-awesome/1.3.0/css/line-awesome.min.css">
-    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/line-awesome/1.3.0/line-awesome/css/line-awesome.min.css" onerror="this.remove()">
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/line-awesome/1.3.0/line-awesome/css/line-awesome.min.css" 
+          onerror="this.remove();document.getElementById('la-fallback').removeAttribute('media')">
+    <style id="la-fallback" media="none">
+        /* line-awesome 离线兜底 — 仅定义用到的图标 */
+        .las.la-wallet::before { content:'💳'; }
+        .las.la-folder::before { content:'📁'; }
+        .las.la-circle::before { content:'●'; }
+        .las.la-wallet, .las.la-folder, .las.la-circle { font-family: monospace; font-size:14px; }
+    </style>
+    <link rel="stylesheet" href="/static/mobile.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -71,25 +79,10 @@
             .sidebar-menu li a { padding: 14px 16px !important; font-size: 15px !important; }
             .sidebar-submenu li a { padding: 12px 16px 12px 36px !important; }
             /* 移动端浮动菜单按钮 */
-            .mobile-menu-btn {
-                display: flex !important;
-                position: fixed; top: 8px; left: 8px; z-index: 1000;
-                width: 40px; height: 40px;
-                background: #07c160; color: #fff;
-                border: none; border-radius: 8px;
-                align-items: center; justify-content: center;
-                font-size: 20px; cursor: pointer;
-                box-shadow: 0 2px 8px rgba(0,0,0,.15);
-            }
-            .mobile-menu-overlay {
-                display: none;
-                position: fixed; inset: 0; background: rgba(0,0,0,.3);
-                z-index: 998;
-            }
-            .mobile-menu-overlay.show { display: block; }
+
         }
         @media (min-width: 769px) {
-            .mobile-menu-btn, .mobile-menu-overlay { display: none !important; }
+
         }
         /* 表格移动端滚动 */
         @media (max-width: 768px) {
@@ -325,6 +318,49 @@
         .color-grid .color-item.selected { border-color: #333; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #333; }
         .toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
         .empty-msg { text-align: center; padding: 40px; color: #999; font-size: 14px; }
+        /* ── 移动端底部Tab栏 ── */
+        @media (max-width: 768px) {
+            .mobile-tabbar {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                z-index: 999;
+                background: #fff;
+                border-top: 1px solid #e0e0e0;
+                padding: 6px 0 env(safe-area-inset-bottom, 6px) 0;
+                justify-content: space-around;
+                box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+            }
+            .mobile-tabbar .tab-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                text-decoration: none;
+                color: #999;
+                font-size: 11px;
+                gap: 2px;
+                padding: 4px 12px;
+                transition: color 0.15s;
+            }
+            .mobile-tabbar .tab-item .tab-icon {
+                font-size: 20px;
+                line-height: 1;
+            }
+            .mobile-tabbar .tab-item.active {
+                color: #07c160;
+            }
+            .mobile-tabbar .tab-item.active .tab-icon {
+                font-weight: bold;
+            }
+            .main-content {
+                padding-bottom: 60px !important;
+            }
+        }
+        @media (min-width: 769px) {
+            .mobile-tabbar { display: none !important; }
+        }
         {% block extra_style %}{% endblock %}
     </style>
 </head>
@@ -414,11 +450,107 @@
             </div>
         </div>
     </div>
-<button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileMenu()">☰</button>
-    <div class="mobile-menu-overlay" id="mobileMenuOverlay" onclick="toggleMobileMenu()"></div>
+
     <div class="main-content">
         {% block content %}{% endblock %}
     </div>
+
+    <!-- ── 移动端底部Tab栏 ── -->
+    <nav class="mobile-tabbar" id="mobileTabbar">
+        <a href="/" class="tab-item {% if request.path == '/' %}active{% endif %}">
+            <span class="tab-icon">🏠</span>
+            <span>首页</span>
+        </a>
+        <a href="/add-transaction" class="tab-item {% if request.path == '/add-transaction' %}active{% endif %}">
+            <span class="tab-icon">📝</span>
+            <span>记账</span>
+        </a>
+        <a href="/transaction" class="tab-item {% if request.path == '/transaction' %}active{% endif %}">
+            <span class="tab-icon">💰</span>
+            <span>交易</span>
+        </a>
+        <a href="javascript:void(0)" class="tab-item" onclick="toggleMobileMoreMenu()">
+            <span class="tab-icon">📋</span>
+            <span>更多</span>
+        </a>
+    </nav>
+
+    <!-- ── 移动端"更多"菜单浮层 ── -->
+    <div class="modal-overlay" id="moreMenuOverlay">
+        <div class="modal" style="width:auto;max-width:95vw;padding:20px;">
+            <h3 style="margin-bottom:16px;font-size:16px;">📋 全部菜单</h3>
+            {% for group in menu_tree %}
+              {% if group.children %}
+                <div class="menu-group">
+                  <div class="menu-group-title">{{ group.icon }} {{ group.label }}</div>
+                  <div class="menu-group-grid">
+                    {% for child in group.children %}
+                    <a href="{{ child.url }}" class="menu-grid-item {% if child.url == request.path %}active{% elif child.url and request.path.startswith(child.url) and child.url != '/' %}active{% endif %}">
+                      {{ child.icon or '' }} {{ child.label }}
+                    </a>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endif %}
+            {% endfor %}
+            {# 单独页面（无子菜单的一级页面） #}
+            {% for item in menu_tree %}
+              {% if not item.children %}
+                <a href="{{ item.url }}" class="menu-grid-item {% if item.url == request.path %}active{% elif item.url and request.path.startswith(item.url) and item.url != '/' %}active{% endif %}">
+                  {{ item.icon or '' }} {{ item.label }}
+                </a>
+              {% endif %}
+            {% endfor %}
+            <div style="margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+                <div style="font-size:13px;color:#555;">
+                  {% if session_is_admin %}👑{% else %}👤{% endif %} {{ session_username }}
+                </div>
+                <div style="display:flex;gap:8px;justify-content:center;">
+                <button class="btn btn-outline btn-sm" id="mobileInstallPwaBtn" onclick="installPWA();closeMoreMenu();" style="display:none;font-size:12px;padding:8px 16px;">📲 安装</button>
+                <a href="/logout" class="btn btn-outline btn-sm" style="font-size:12px;padding:8px 16px;text-decoration:none;">🚪 退出登录</a>
+                </div>
+            <div style="margin-top:8px;text-align:center;">
+                <button class="btn btn-outline" onclick="closeMoreMenu()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+    .menu-group { margin-bottom: 14px; }
+    .menu-group-title {
+        font-size: 13px; font-weight: 600; color: #888; margin-bottom: 8px; padding-left: 4px;
+    }
+    .menu-group-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+    }
+    @media (min-width: 480px) {
+        .menu-group-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    .menu-grid-item {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 4px;
+        background: #f8f8f8;
+        border-radius: 8px;
+        text-decoration: none;
+        color: #555;
+        font-size: 12px;
+        transition: all 0.15s;
+        text-align: center;
+    }
+    .menu-grid-item:hover { background: #e8f5e9; color: #07c160; }
+    .menu-grid-item.active { background: #e8f5e9; color: #07c160; font-weight: 600; }
+    </style>
+
+    <script>
+    function toggleMobileMoreMenu() {
+        document.getElementById('moreMenuOverlay').classList.toggle('active');
+    }
+    function closeMoreMenu() {
+        document.getElementById('moreMenuOverlay').classList.remove('active');
+    }
+    </script>
 
     <div class="toast" id="toast"></div>
 
@@ -487,12 +619,6 @@
             const btn = sidebar.querySelector('.sidebar-toggle');
             btn.textContent = isCollapsed ? '▶' : '◀';
             try { localStorage.setItem('sidebar_collapsed', isCollapsed ? '1' : '0'); } catch(e) {}
-        }
-        function toggleMobileMenu() {
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('mobileMenuOverlay');
-            const isOpen = sidebar.classList.toggle('open');
-            overlay.classList.toggle('show', isOpen);
         }
         (function() {
             try {
@@ -572,6 +698,76 @@
             }
         }
 
+        /* ── 左滑卡片通用初始化 ── */
+        function initSwipeCards(containerEl) {
+            if (!containerEl) return;
+            var wraps = containerEl.querySelectorAll('.card-swipe-wrap');
+            wraps.forEach(function(wrap) {
+                var inner = wrap.querySelector('.card-swipe-inner');
+                if (!inner) return;
+                var startX, currentX, isDragging, actionsWidth;
+
+                function getActionsWidth() {
+                    var acts = wrap.querySelector('.card-actions');
+                    return acts ? acts.offsetWidth : 160;
+                }
+
+                function closeSwipe(animate) {
+                    if (animate !== false) inner.style.transition = 'transform 0.25s ease';
+                    else inner.style.transition = 'none';
+                    inner.style.transform = '';
+                    wrap.classList.remove('swiped');
+                }
+
+                wrap.addEventListener('touchstart', function(e) {
+                    if (e.target.closest('button, a, input, .card-actions')) return;
+                    startX = e.touches[0].clientX;
+                    currentX = startX;
+                    isDragging = true;
+                    actionsWidth = getActionsWidth();
+                    inner.style.transition = 'none';
+                }, {passive: true});
+
+                wrap.addEventListener('touchmove', function(e) {
+                    if (!isDragging) return;
+                    currentX = e.touches[0].clientX;
+                    var offset = currentX - startX;
+                    var cur = parseFloat(inner.style.transform.replace('translateX(','').replace('px)','')) || 0;
+                    if (cur < 0) {
+                        // already open — allow follow finger right
+                        inner.style.transform = 'translateX(' + Math.min(offset + cur, 0) + 'px)';
+                    } else if (offset < -5) {
+                        // start opening
+                        inner.style.transform = 'translateX(' + Math.max(offset, -actionsWidth) + 'px)';
+                    }
+                }, {passive: true});
+
+                wrap.addEventListener('touchend', function() {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    var offset = currentX - startX;
+                    inner.style.transition = 'transform 0.25s ease';
+                    if (offset < -40) {
+                        inner.style.transform = 'translateX(-' + actionsWidth + 'px)';
+                        wrap.classList.add('swiped');
+                    } else {
+                        inner.style.transform = '';
+                        wrap.classList.remove('swiped');
+                    }
+                }, {passive: true});
+            });
+
+            // 点击其他区域关闭已展开的卡片
+            document.addEventListener('touchstart', function(e) {
+                var swiped = document.querySelector('.card-swipe-wrap.swiped');
+                if (swiped && !swiped.contains(e.target)) {
+                    var inner = swiped.querySelector('.card-swipe-inner');
+                    if (inner) { inner.style.transition = 'transform 0.25s ease'; inner.style.transform = ''; }
+                    swiped.classList.remove('swiped');
+                }
+            }, {passive: true});
+        }
+
         {% block extra_script %}{% endblock %}
     </script>
 
@@ -582,9 +778,12 @@
     function showInstallControls() {
         var btn = document.getElementById('installPwaBtn');
         var sep = document.getElementById('installSep');
+        var mobileBtn = document.getElementById('mobileInstallPwaBtn');
         var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-        if (btn) btn.style.display = isStandalone ? 'none' : '';
-        if (sep) sep.style.display = isStandalone ? 'none' : '';
+        var canInstall = !isStandalone && deferredPrompt !== null;
+        if (btn) btn.style.display = canInstall ? '' : 'none';
+        if (sep) sep.style.display = canInstall ? '' : 'none';
+        if (mobileBtn) mobileBtn.style.display = canInstall ? '' : 'none';
     }
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {

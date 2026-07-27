@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}别名管理{% endblock %}
+{% block content %}
+<h2>🏷️ 别名管理</h2>
+<p class="subtitle">管理商户名→科目、账户名→账户的映射，OCR/短信识别时自动匹配</p>
+
+<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+  <select id="filterType" onchange="loadAliases()" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+    <option value="">全部类型</option>
+    <option value="category">科目</option>
+    <option value="account">账户</option>
+  </select>
+  <button class="btn btn-primary" onclick="openAliasModal()">➕ 新增别名</button>
+</div>
+
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+  <div class="table-wrap">
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:#fafafa;border-bottom:1px solid #eee;">
+        <th style="padding:12px 14px;text-align:left;color:#555;">输入文本</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">类型</th>
+        <th style="padding:12px 14px;text-align:left;color:#555;">目标名称</th>
+        <th style="padding:12px 14px;text-align:center;color:#555;width:140px;">操作</th>
+      </tr>
+    </thead>
+    <tbody id="aliasBody">
+      <tr><td colspan="4" style="text-align:center;padding:30px;color:#999;">加载中...</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div id="aliasCards" class="alias-cards"></div>
+</div>
+
+<!-- 别名编辑弹窗 -->
+<div class="modal-overlay" id="aliasModal">
+  <div class="modal" style="width:420px;">
+    <h3 id="aliasModalTitle">新增别名</h3>
+    <input type="hidden" id="aliasEditId" value="">
+    <div class="field">
+      <label>输入文本 <span style="color:#e4393c;">*</span></label>
+      <input type="text" id="aliasInput" placeholder="如：杂粮煎饼、建行信用卡">
+    </div>
+    <div class="field">
+      <label>类型 <span style="color:#e4393c;">*</span></label>
+      <select id="aliasTargetType" onchange="loadAliasTargets()">
+        <option value="category">📂 科目</option>
+        <option value="account">🏦 账户</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>目标 <span style="color:#e4393c;">*</span></label>
+      <select id="aliasTargetId"><option value="">请先选择类型</option></select>
+    </div>
+    <div id="aliasError" style="display:none;background:#fce4ec;color:#c62828;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:12px;"></div>
+    <div class="btns">
+      <button class="btn btn-outline" onclick="closeAliasModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitAlias()">保存</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.alias-cards { display: none; }
+.alias-card { display: none; margin:12px; padding:14px 16px; background:#f9f9f9; border-radius:10px; font-size:13px; line-height:1.7; }
+.alias-card .ac-row { display:flex; justify-content:space-between; align-items:center; }
+.alias-card .ac-label { color:#888; }
+.alias-card .ac-value { color:#333; font-weight:500; }
+.alias-card .ac-actions { display:flex; gap:8px; margin-top:6px; justify-content:flex-end; }
+.operate-btn { padding:4px 10px; border:none; border-radius:4px; font-size:12px; cursor:pointer; }
+.operate-btn.edit { background:#e3f2fd; color:#1565c0; }
+.operate-btn.danger { background:#fce4ec; color:#c62828; }
+.operate-btn.edit:hover { background:#bbdefb; }
+.operate-btn.danger:hover { background:#f8bbd0; }
+@media (max-width:768px) { .table-wrap { display:none; } .alias-cards { display:block; } }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+function $(id){return document.getElementById(id);}
+function escapeHtml(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):'';}
+
+async function loadAliases(){
+  var t=$('filterType').value;
+  try{
+    var r=await(await fetch('/api/aliases?target_type='+encodeURIComponent(t))).json();
+    var b=$('aliasBody'),c=$('aliasCards');
+    if(r.success&&r.data&&r.data.length){
+      b.innerHTML=r.data.map(function(a){var l=a.target_type==='category'?'📂科目':'🏦账户';
+        return '<tr style="border-bottom:1px solid #f0f0f0;">'+
+          '<td style="padding:12px 14px;">'+escapeHtml(a.input_text)+'</td>'+
+          '<td style="padding:12px 14px;">'+l+'</td>'+
+          '<td style="padding:12px 14px;">'+escapeHtml(a.target_name||'')+'</td>'+
+          '<td style="padding:12px 14px;text-align:center;">'+
+          '<button class="operate-btn edit" onclick="openAliasModal('+a.id+')">✏️编辑</button> '+
+          '<button class="operate-btn danger" onclick="deleteAlias('+a.id+')">🗑️删除</button></td></tr>';
+      }).join('');
+      c.innerHTML=r.data.map(function(a){var l=a.target_type==='category'?'📂科目':'🏦账户';
+        return '<div class="alias-card" style="padding:0;">'+
+          '<div class="card-swipe-wrap" style="border-radius:10px;">'+
+          '  <div class="card-swipe-inner">'+
+          '    <div style="flex:1 0 100%;width:100%;padding:14px 16px;">'+
+          '      <div class="ac-row"><span class="ac-label">输入</span><span class="ac-value">'+escapeHtml(a.input_text)+'</span></div>'+
+          '      <div class="ac-row"><span class="ac-label">类型</span><span class="ac-value">'+l+'</span></div>'+
+          '      <div class="ac-row"><span class="ac-label">目标</span><span class="ac-value">'+escapeHtml(a.target_name||'')+'</span></div>'+
+          '    </div>'+
+          '    <div class="card-actions" style="padding:14px 10px;gap:8px;">'+
+          '      <button class="operate-btn edit" onclick="openAliasModal('+a.id+')">✏️</button>'+
+          '      <button class="operate-btn danger" onclick="deleteAlias('+a.id+')">🗑️</button>'+
+          '    </div>'+
+          '  </div>'+
+          '  <div class="swipe-hint"></div>'+
+          '</div></div>';
+      }).join('');
+      initSwipeCards(c);
+    }else{
+      b.innerHTML='<tr><td colspan="4" style="text-align:center;padding:30px;color:#999;">暂无别名数据</td></tr>';
+      c.innerHTML='<div class="alias-card" style="text-align:center;color:#999;">暂无别名数据</div>';
+    }
+  }catch(e){$('aliasBody').innerHTML='<tr><td colspan="4" style="text-align:center;padding:30px;color:#c62828;">加载失败</td></tr>';}
+}
+
+function openAliasModal(id){
+  $('aliasError').style.display='none';
+  if(id){
+    $('aliasModalTitle').textContent='编辑别名';
+    fetch('/api/aliases').then(function(r){return r.json();}).then(function(r){
+      if(r.success){
+        var a=r.data.find(function(x){return x.id===id;});
+        if(a){
+          $('aliasEditId').value=a.id;
+          $('aliasInput').value=a.input_text;
+          $('aliasTargetType').value=a.target_type;
+          loadAliasTargets(function(){$('aliasTargetId').value=a.target_id;});
+          $('aliasModal').classList.add('active');
+        }
+      }
+    });
+  }else{
+    $('aliasModalTitle').textContent='新增别名';
+    $('aliasEditId').value='';$('aliasInput').value='';
+    $('aliasTargetType').value='category';
+    loadAliasTargets();
+    $('aliasModal').classList.add('active');
+    setTimeout(function(){$('aliasInput').focus();},100);
+  }
+}
+function closeAliasModal(){$('aliasModal').classList.remove('active');}
+
+async function loadAliasTargets(cb){
+  var t=$('aliasTargetType').value;
+  var url=t==='category'?'/api/categories/leaf-names?bill_type=expense':'/api/accounts';
+  try{
+    var r=await(await fetch(url)).json();
+    var s=$('aliasTargetId');
+    s.innerHTML='<option value="">--请选择--</option>';
+    var items=[];
+    if(t==='category'){
+      items=(r.data||[]).map(function(i){return {id:i.id||i,name:i.name||i};});
+    }else{
+      // 扁平化账户树
+      function flatten(accts){accts.forEach(function(a){if(a.subAccounts&&a.subAccounts.length){flatten(a.subAccounts);}else{items.push({id:a.id,name:a.name+(a.currency?' ('+a.currency+')':'')});}});}
+      flatten(r.data||[]);
+    }
+    items.forEach(function(i){s.innerHTML+='<option value="'+i.id+'">'+i.name+'</option>';});
+    if(cb)cb();
+  }catch(e){$('aliasTargetId').innerHTML='<option value="">加载失败</option>';}
+}
+
+async function submitAlias(){
+  var id=$('aliasEditId').value,it=$('aliasInput').value.trim(),tt=$('aliasTargetType').value,ti=$('aliasTargetId').value;
+  if(!it){$('aliasError').textContent='请输入输入文本';$('aliasError').style.display='block';return;}
+  if(!ti){$('aliasError').textContent='请选择目标';$('aliasError').style.display='block';return;}
+  var tn=$('aliasTargetId').options[$('aliasTargetId').selectedIndex].textContent;
+  var body={input_text:it,target_type:tt,target_id:ti,target_name:tn};
+  if(id)body.id=parseInt(id);
+  try{
+    var r=await(await fetch(id?'/api/aliases/modify':'/api/aliases/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.success){showToast('✅ '+r.message,'success');closeAliasModal();loadAliases();}
+    else{$('aliasError').textContent=r.message||'操作失败';$('aliasError').style.display='block';}
+  }catch(e){$('aliasError').textContent='网络错误';$('aliasError').style.display='block';}
+}
+
+async function deleteAlias(id){
+  if(!confirm('确认删除该别名？'))return;
+  try{
+    var r=await(await fetch('/api/aliases/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json();
+    r.success?showToast('✅ 已删除','success'):showToast('❌ '+(r.message||'删除失败'),'error');
+    loadAliases();
+  }catch(e){showToast('❌ 网络错误','error');}
+}
+
+loadAliases();
+{% endblock %}

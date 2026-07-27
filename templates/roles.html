@@ -8,7 +8,7 @@
   <button class="btn btn-primary" onclick="openCreateModal()">➕ 新增角色</button>
 </div>
 
-<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;" class="desktop-only">
   <div class="table-wrap">
   <table style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead>
@@ -26,6 +26,8 @@
   </table>
   </div>
 </div>
+<!-- 手机端卡片 -->
+<div id="roleCards" class="mobile-only"></div>
 
 <!-- 编辑弹窗 -->
 <div class="modal-overlay" id="editModal">
@@ -94,9 +96,6 @@
 
 {% block extra_style %}
 <style>
-  .badge { display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px; }
-  .badge-yes { background:#e8f5e9;color:#2e7d32; }
-  .badge-no { background:#f5f5f5;color:#999; }
   table tbody tr:hover { background:#f0f7ff; }
   table tbody tr:nth-child(even) { background:#fafafa; }
   .op-btn { padding:4px 8px;border:none;border-radius:3px;font-size:13px;cursor:pointer;background:none; }
@@ -116,35 +115,79 @@
 {% block extra_script %}
 function $(id) { return document.getElementById(id); }
 
+function isMobile() { return window.innerWidth < 769; }
+
 async function loadRoles() {
   var tbody = $('roleBody');
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+  var cardArea = $('roleCards');
+  var mobile = isMobile();
+  if (mobile) {
+    tbody.innerHTML = '';
+    cardArea.innerHTML = '<div class="loading">加载中...</div>';
+  } else {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
+    cardArea.innerHTML = '';
+  }
   try {
     var resp = await fetch('/api/roles/list');
     var result = await resp.json();
     if (!result.success) throw new Error(result.message);
     var roles = result.data || [];
     if (roles.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">暂无角色</td></tr>';
+      var empty = '<div class="empty-msg">暂无角色</div>';
+      if (mobile) { cardArea.innerHTML = empty; }
+      else { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">暂无角色</td></tr>'; }
       return;
     }
-    var html = '';
-    roles.forEach(function(r) {
-      html += '<tr>';
-      html += '<td style="padding:12px 14px;font-weight:600;">' + escapeHtml(r.code) + '</td>';
-      html += '<td style="padding:12px 14px;">' + escapeHtml(r.name) + '</td>';
-      html += '<td style="padding:12px 14px;color:#888;">' + escapeHtml(r.description || '') + '</td>';
-      html += '<td style="padding:12px 14px;text-align:center;"><span class="badge ' + (r.is_default ? 'badge-yes' : 'badge-no') + '">' + (r.is_default ? '是' : '否') + '</span></td>';
-      html += '<td style="padding:12px 14px;text-align:center;">';
-      html += '<button class="op-btn edit" onclick="openEditModal(' + r.id + ')" title="基本信息">✏️</button>';
-      html += '<button class="op-btn menu" onclick="openMenuModal(' + r.id + ')" title="菜单授权">🔐</button>';
-      html += '<button class="op-btn user" onclick="openUserModal(' + r.id + ')" title="绑定用户">👤</button>';
-      html += '<button class="op-btn del" onclick="deleteRole(' + r.id + ')">🗑️</button>';
-      html += '</td></tr>';
-    });
-    tbody.innerHTML = html;
+    if (mobile) {
+      var html = '';
+      roles.forEach(function(r) {
+        html += '<div class="card-section role-card">';
+        html += '  <div class="card-swipe-wrap">';
+        html += '    <div class="card-swipe-inner">';
+        html += '      <div class="card-item">';
+        html += '        <div class="role-icon">👥</div>';
+        html += '        <div class="info">';
+        html += '          <div class="title">' + escapeHtml(r.name) + ' <span style="font-size:11px;color:#999;font-weight:400;">' + escapeHtml(r.code) + '</span>';
+        html += '            <span class="badge ' + (r.is_default ? 'badge-yes' : 'badge-no') + '">' + (r.is_default ? '默认' : '') + '</span>';
+        html += '          </div>';
+        html += '          <div class="meta">' + escapeHtml(r.description || '') + '</div>';
+        html += '        </div>';
+        html += '      </div>';
+        html += '      <div class="card-actions">';
+        html += '        <button class="btn btn-outline btn-sm" onclick="openEditModal(' + r.id + ')" title="基本信息">✏️</button>';
+        html += '        <button class="btn btn-outline btn-sm" onclick="openMenuModal(' + r.id + ')" title="菜单授权">🔐</button>';
+        html += '        <button class="btn btn-outline btn-sm" onclick="openUserModal(' + r.id + ')" title="绑定用户">👤</button>';
+        html += '        <button class="btn btn-danger btn-sm" onclick="deleteRole(' + r.id + ')">🗑️</button>';
+        html += '      </div>';
+        html += '    </div>';
+        html += '    <div class="swipe-hint"></div>';
+        html += '  </div>';
+        html += '</div>';
+      });
+      cardArea.innerHTML = html;
+      initSwipeCards(cardArea);
+    } else {
+      var html = '';
+      roles.forEach(function(r) {
+        html += '<tr>';
+        html += '<td style="padding:12px 14px;font-weight:600;">' + escapeHtml(r.code) + '</td>';
+        html += '<td style="padding:12px 14px;">' + escapeHtml(r.name) + '</td>';
+        html += '<td style="padding:12px 14px;color:#888;">' + escapeHtml(r.description || '') + '</td>';
+        html += '<td style="padding:12px 14px;text-align:center;"><span class="badge ' + (r.is_default ? 'badge-yes' : 'badge-no') + '">' + (r.is_default ? '是' : '否') + '</span></td>';
+        html += '<td style="padding:12px 14px;text-align:center;">';
+        html += '<button class="op-btn edit" onclick="openEditModal(' + r.id + ')" title="基本信息">✏️</button>';
+        html += '<button class="op-btn menu" onclick="openMenuModal(' + r.id + ')" title="菜单授权">🔐</button>';
+        html += '<button class="op-btn user" onclick="openUserModal(' + r.id + ')" title="绑定用户">👤</button>';
+        html += '<button class="op-btn del" onclick="deleteRole(' + r.id + ')">🗑️</button>';
+        html += '</td></tr>';
+      });
+      tbody.innerHTML = html;
+    }
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+    var err = '<div class="error-msg">❌ ' + escapeHtml(e.message) + '</div>';
+    if (mobile) { cardArea.innerHTML = err; }
+    else { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>'; }
   }
 }
 
@@ -351,4 +394,9 @@ async function deleteRole(id) {
 }
 
 loadRoles();
+var _roleResizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(_roleResizeTimer);
+  _roleResizeTimer = setTimeout(loadRoles, 300);
+});
 {% endblock %}

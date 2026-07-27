@@ -8,7 +8,7 @@
   <button class="btn btn-primary" onclick="openCreateModal()">➕ 新增菜单</button>
 </div>
 
-<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+<div style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;" class="desktop-only">
 <div class="table-wrap">
   <table style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead>
@@ -29,6 +29,9 @@
     </tbody>
   </table>
 </div>
+</div>
+<!-- 手机端卡片 -->
+<div id="menuCards" class="mobile-only"></div>
 
 <!-- 编辑弹窗 -->
 <div class="modal-overlay" id="editModal">
@@ -103,6 +106,7 @@ function $(id) { return document.getElementById(id); }
 
 async function loadMenus() {
   var tbody = $('menuBody');
+  var cards = $('menuCards');
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">加载中...</td></tr>';
   try {
     var resp = await fetch('/api/menus/list');
@@ -113,11 +117,10 @@ async function loadMenus() {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#999;">暂无菜单</td></tr>';
       return;
     }
-    var html = '';
-    // 构建父子映射表
+    var _mobile = window.innerWidth < 769;
     var byParent = {};
     menus.forEach(function(m) { byParent[m.id] = m; });
-    // 递归渲染树（最多3级）
+
     function renderRow(m, depth) {
       if (!m) return '';
       var activeLabel = m.is_active ? '启用' : '停用';
@@ -129,6 +132,20 @@ async function loadMenus() {
       var prefix = '';
       if (depth === 1) prefix = '└─ ';
       if (depth === 2) prefix = '&emsp;↳ ';
+      if (_mobile) {
+        var orderLabel = (m.type === 'dir' ? '📁' : (m.type === 'btn' ? '🔘' : '📄'));
+        var expandedLabel = (m.type === 'dir') ? (m.default_expanded ? '展开' : '收起') : '—';
+        var card = '<div class="card-swipe-wrap" style="border-radius:8px;margin-bottom:4px;"><div class="card-swipe-inner">';
+        card += '<div style="flex:1 0 100%;width:100%;padding:10px 14px;"><div style="font-size:13px;font-weight:600;">' + (m.icon || '📄') + ' ' + escapeHtml(m.label) + '</div>';
+        card += '<div style="font-size:11px;color:#888;margin-top:2px;">' + typeLabel + ' · ' + escapeHtml(parentName) + (m.url ? ' · ' + escapeHtml(m.url) : '') + '</div>';
+        card += '<div style="font-size:11px;color:#888;margin-top:2px;">排序:' + m.sort_order + ' · ' + expandedLabel + ' · <span class="badge ' + activeClass + '">' + activeLabel + '</span></div>';
+        card += '</div>';
+        card += '<div class="card-actions" style="padding:10px;">';
+        card += '<button class="op-btn edit" onclick="openEditModal(' + m.id + ')">✏️</button>';
+        card += '<button class="op-btn del" onclick="deleteMenu(' + m.id + ')">🗑️</button>';
+        card += '</div></div><div class="swipe-hint"></div></div>';
+        return card;
+      }
       var row = '<tr>';
       row += '<td style="padding:12px 14px;text-align:center;color:#888;">' + m.sort_order + '</td>';
       row += '<td style="padding:12px 14px;text-align:center;font-size:18px;">' + (m.icon || '📄') + '</td>';
@@ -145,25 +162,28 @@ async function loadMenus() {
       row += '</td></tr>';
       return row;
     }
-    // 先渲染顶级（dir 和 page）
+    var html = '';
     var tops = menus.filter(function(m) { return m.parent_id === 0 || !byParent[m.parent_id]; });
     tops.forEach(function(top) {
       html += renderRow(top, 0);
       if (top.type === 'dir') {
-        // 二级：属于此目录的 page
         var children = menus.filter(function(m) { return m.parent_id === top.id && m.type === 'page'; });
         children.forEach(function(child) {
           html += renderRow(child, 1);
-          // 三级：属于此 page 的 btn
           var btns = menus.filter(function(m) { return m.parent_id === child.id && m.type === 'btn'; });
           btns.forEach(function(btn) { html += renderRow(btn, 2); });
         });
-        // 也显示直接挂在 dir 下的 btn
         var dirBtns = menus.filter(function(m) { return m.parent_id === top.id && m.type === 'btn'; });
         dirBtns.forEach(function(btn) { html += renderRow(btn, 1); });
       }
     });
-    tbody.innerHTML = html;
+    if (_mobile) {
+      cards.innerHTML = html;
+      initSwipeCards(cards);
+      tbody.innerHTML = '';
+    } else {
+      tbody.innerHTML = html;
+    }
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
   }

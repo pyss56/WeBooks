@@ -1,0 +1,529 @@
+{% extends "base.html" %}
+{% block title %}OCR 识别消费截图{% endblock %}
+
+{% block content %}
+<h2>📷 OCR 识别消费截图</h2>
+<p class="subtitle">上传支付截图（微信 / 支付宝），自动识别金额、时间、商户等信息</p>
+
+{% if not ocr_available %}
+<div style="background:#fff3e0;border:1px solid #ffcc02;border-radius:8px;padding:16px 20px;margin-bottom:16px;color:#e65100;font-size:14px;">
+  ⚠️ OCR 引擎未安装。请先执行：<code style="background:#f5f5f5;padding:2px 6px;border-radius:4px;">pip install paddleocr</code>
+</div>
+{% endif %}
+
+<div class="ocr-container">
+  <!-- 上传区域 -->
+  <div class="upload-zone" id="uploadZone">
+    <div class="upload-icon">📤</div>
+    <div class="upload-text">点击上传或拖拽截图到此处</div>
+    <div class="upload-hint">支持 JPG / PNG / WebP，单张不超过 20MB</div>
+    <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/webp" hidden>
+    <button class="btn btn-primary" id="selectBtn" onclick="document.getElementById('fileInput').click()">选择图片</button>
+  </div>
+
+  <!-- 预览区域 -->
+  <div class="preview-area" id="previewArea" style="display:none;">
+    <div class="preview-header">
+      <span class="preview-title">📸 截图预览</span>
+      <button class="btn btn-sm btn-outline" onclick="resetUpload()">重新选择</button>
+    </div>
+    <div class="preview-image-wrap">
+      <img id="previewImage" class="preview-image" alt="截图预览">
+    </div>
+  </div>
+
+  <!-- 加载状态 -->
+  <div class="loading-area" id="loadingArea" style="display:none;">
+    <div class="loading-spinner">⏳</div>
+    <div class="loading-text">正在识别中，请稍候...</div>
+  </div>
+
+  <!-- 识别结果 -->
+  <div class="result-area" id="resultArea" style="display:none;">
+    <div class="result-header">
+      <span class="result-title">📋 识别结果</span>
+    </div>
+    <div class="result-card">
+      <div class="result-field">
+        <label>交易类型</label>
+        <div id="resultType" class="result-value">
+          <span class="type-badge type-expense">支出</span>
+        </div>
+      </div>
+      <div class="result-field">
+        <label>金额（元）</label>
+        <div id="resultAmount" class="result-value highlight">¥0.00</div>
+      </div>
+      <div class="result-field">
+        <label>交易时间</label>
+        <div id="resultTime" class="result-value">--</div>
+      </div>
+      <div class="result-field">
+        <label>商户名称</label>
+        <div id="resultMerchant" class="result-value">--</div>
+      </div>
+      <div class="result-field">
+        <label>推测科目</label>
+        <div id="resultCategory" class="result-value">--</div>
+      </div>
+      <div class="result-field">
+        <label>原始文本</label>
+        <div id="resultRawText" class="result-value raw-text">--</div>
+      </div>
+    </div>
+
+    <!-- 快速记账 -->
+    <div class="quick-book">
+      <div class="result-header" style="margin-top:16px;">
+        <span class="result-title">📝 快速记账</span>
+      </div>
+      <div class="result-card">
+        <div class="field">
+          <label>科目 <span style="color:#e4393c;">*</span></label>
+          <select id="categorySelect">
+            <option value="">请选择科目</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>账户 <span style="color:#e4393c;">*</span></label>
+          <select id="accountSelect">
+            <option value="">请选择账户</option>
+            {% for acct in accounts %}
+            <option value="{{ acct.id }}">{{ acct.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>备注 <span style="color:#888;font-weight:400;">（可选）</span></label>
+          <input type="text" id="commentInput" placeholder="商户名或其他备注">
+        </div>
+        <div class="field">
+          <label>记账人</label>
+          {% if session_is_admin %}
+          <select id="userSelect">
+            <option value="">默认（{{ session_username }}）</option>
+            {% for u in users %}
+            <option value="{{ u.code }}" {% if u.code == session_user_code %}selected{% endif %}>{{ u.name }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <div style="padding:10px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;color:#555;">
+            👤 {{ session_username }}
+            <input type="hidden" id="userSelect" value="{{ session_user_code }}">
+          </div>
+          {% endif %}
+        </div>
+        <div id="ocrErrorMsg" style="display:none;background:#fce4ec;color:#c62828;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;"></div>
+        <div class="btns">
+          <button class="btn btn-primary" id="bookBtn" onclick="quickBook()">✅ 确认记账</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+<style>
+.ocr-container {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.upload-zone {
+  background: #fff;
+  border: 2px dashed #d9d9d9;
+  border-radius: 16px;
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s;
+  margin-bottom: 20px;
+}
+.upload-zone:hover,
+.upload-zone.dragover {
+  border-color: #07c160;
+  background: #f6ffed;
+}
+.upload-icon { font-size: 48px; margin-bottom: 12px; }
+.upload-text { font-size: 16px; color: #333; margin-bottom: 8px; }
+.upload-hint { font-size: 13px; color: #999; margin-bottom: 16px; }
+
+.preview-area {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  margin-bottom: 20px;
+}
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.preview-title { font-size: 15px; font-weight: 600; color: #333; }
+.preview-image-wrap {
+  text-align: center;
+  max-height: 400px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.preview-image {
+  max-width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+}
+
+.loading-area {
+  text-align: center;
+  padding: 48px 24px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  margin-bottom: 20px;
+}
+.loading-spinner { font-size: 40px; animation: pulse 1s ease-in-out infinite; margin-bottom: 12px; }
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+.loading-text { font-size: 15px; color: #888; }
+
+.result-area { margin-bottom: 20px; }
+.result-header { margin-bottom: 12px; }
+.result-title { font-size: 15px; font-weight: 600; color: #333; }
+.result-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.result-field {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: flex-start;
+}
+.result-field label {
+  width: 80px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #888;
+  padding-top: 4px;
+}
+.result-value {
+  flex: 1;
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+.result-value.highlight {
+  font-size: 20px;
+  font-weight: 700;
+  color: #e4393c;
+}
+.result-value.highlight.income {
+  color: #2e7d32;
+}
+.result-value.raw-text {
+  font-size: 11px;
+  color: #999;
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+  word-break: break-all;
+}
+.type-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.type-badge.type-expense { background: #fce4ec; color: #c62828; }
+.type-badge.type-income { background: #e8f5e9; color: #2e7d32; }
+
+.quick-book .field { margin-bottom: 14px; }
+.quick-book .field label {
+  display: block;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 4px;
+}
+.quick-book .field input,
+.quick-book .field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+.quick-book .field input:focus,
+.quick-book .field select:focus {
+  border-color: #07c160 !important;
+  box-shadow: 0 0 0 2px rgba(7,193,96,0.1);
+}
+
+@media (max-width: 768px) {
+  .result-field { flex-direction: column; }
+  .result-field label { width: auto; margin-bottom: 4px; }
+}
+</style>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+var EXPENSE_CATEGORIES = {{ expense_categories | tojson | safe }};
+var INCOME_CATEGORIES = {{ income_categories | tojson | safe }};
+var currentBillType = 'expense';
+var currentAmount = null;
+var currentTime = null;
+var currentMerchant = '';
+var uploadedFilePath = '';
+
+function $(id) { return document.getElementById(id); }
+
+/* ── 上传区域交互 ── */
+var uploadZone = $('uploadZone');
+var fileInput = $('fileInput');
+
+uploadZone.addEventListener('click', function(e) {
+  if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
+    fileInput.click();
+  }
+});
+
+uploadZone.addEventListener('dragover', function(e) {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', function() {
+  uploadZone.classList.remove('dragover');
+});
+uploadZone.addEventListener('drop', function(e) {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length > 0) {
+    handleFile(e.dataTransfer.files[0]);
+  }
+});
+
+fileInput.addEventListener('change', function() {
+  if (fileInput.files.length > 0) {
+    handleFile(fileInput.files[0]);
+  }
+});
+
+function handleFile(file) {
+  // 检查格式
+  var ext = file.name.split('.').pop().toLowerCase();
+  if (!['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) {
+    showOcrError('不支持的文件格式，请上传 JPG/PNG/WebP 格式图片');
+    return;
+  }
+  // 检查大小
+  if (file.size > 20 * 1024 * 1024) {
+    showOcrError('文件大小超过 20MB 限制');
+    return;
+  }
+
+  // 显示预览
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    $('previewImage').src = e.target.result;
+    $('previewArea').style.display = 'block';
+    $('uploadZone').style.display = 'none';
+    $('resultArea').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+
+  // 上传识别
+  uploadAndOCR(file);
+}
+
+function resetUpload() {
+  $('uploadZone').style.display = 'block';
+  $('previewArea').style.display = 'none';
+  $('resultArea').style.display = 'none';
+  $('loadingArea').style.display = 'none';
+  fileInput.value = '';
+  uploadedFilePath = '';
+}
+
+function showOcrError(msg) {
+  showToast(msg, 'error');
+}
+
+/* ── OCR 识别 ── */
+async function uploadAndOCR(file) {
+  $('loadingArea').style.display = 'block';
+  $('resultArea').style.display = 'none';
+
+  var formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    var resp = await fetch('/api/ocr/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    var result = await resp.json();
+
+    $('loadingArea').style.display = 'none';
+
+    if (result.success) {
+      displayResult(result);
+    } else {
+      showOcrError(result.message || '识别失败');
+    }
+  } catch (e) {
+    $('loadingArea').style.display = 'none';
+    showOcrError('网络错误，请重试');
+  }
+}
+
+/* ── 展示识别结果 ── */
+function displayResult(data) {
+  var billType = data.bill_type || 'expense';
+  var amount = data.amount;
+  var time = data.transaction_time;
+  var merchant = data.merchant;
+  var category = data.category_name;
+  var rawTexts = data.raw_texts || [];
+
+  currentBillType = billType;
+  currentAmount = amount;
+  currentTime = time;
+  currentMerchant = merchant || '';
+  uploadedFilePath = data.file_path || '';
+
+  // 交易类型
+  var typeEl = $('resultType');
+  if (billType === 'expense') {
+    typeEl.innerHTML = '<span class="type-badge type-expense">💸 支出</span>';
+  } else {
+    typeEl.innerHTML = '<span class="type-badge type-income">💰 收入</span>';
+  }
+
+  // 金额
+  var amountEl = $('resultAmount');
+  if (amount) {
+    amountEl.textContent = '¥' + parseFloat(amount).toFixed(2);
+    amountEl.className = 'result-value highlight' + (billType === 'income' ? ' income' : '');
+  } else {
+    amountEl.textContent = '未识别到金额';
+    amountEl.className = 'result-value';
+  }
+
+  // 时间
+  $('resultTime').textContent = time || '未识别';
+
+  // 商户
+  $('resultMerchant').textContent = merchant || '未识别';
+
+  // 科目
+  var catEl = $('resultCategory');
+  if (category) {
+    catEl.innerHTML = '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:4px;">' + category + '</span>';
+  } else {
+    catEl.textContent = '未识别（请手动选择）';
+  }
+
+  // 原始文本
+  var rawEl = $('resultRawText');
+  if (rawTexts.length > 0) {
+    rawEl.textContent = rawTexts.map(function(t) { return t.text; }).join(' | ');
+  } else {
+    rawEl.textContent = '--';
+  }
+
+  // 填充快速记账表单
+  var catSelect = $('categorySelect');
+  catSelect.innerHTML = '<option value="">请选择科目</option>';
+  var cats = billType === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+  var selectedIdx = 0;
+  cats.forEach(function(cat, idx) {
+    var opt = document.createElement('option');
+    opt.value = cat.id;
+    opt.textContent = cat.name + (cat.parent_name ? '（' + cat.parent_name + '）' : '');
+    if (category && cat.name === category) {
+      opt.selected = true;
+      selectedIdx = idx;
+    }
+    catSelect.appendChild(opt);
+  });
+
+  // 填充备注
+  if (merchant) {
+    $('commentInput').value = merchant;
+  }
+
+  $('resultArea').style.display = 'block';
+  $('resultArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── 快速记账 ── */
+async function quickBook() {
+  var categoryId = $('categorySelect').value;
+  var accountId = $('accountSelect').value;
+  var comment = $('commentInput').value.trim();
+  var userCode = $('userSelect').value;
+
+  if (!categoryId) { showOcrFormError('请选择科目'); return; }
+  if (!accountId) { showOcrFormError('请选择账户'); return; }
+
+  var btn = $('bookBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 提交中...';
+
+  try {
+    var catSel = $('categorySelect');
+    var catText = catSel.options[catSel.selectedIndex].textContent.split('（')[0] || '';
+
+    var payload = {
+      bill_type: currentBillType,
+      category_name: catText,
+      amount: currentAmount || 0,
+      account_id: accountId,
+      comment: comment || (currentMerchant || ''),
+      user_code: userCode || null,
+    };
+    // 如果有识别到时间
+    if (currentTime) {
+      payload.transaction_time = currentTime;
+    }
+
+    var resp = await fetch('/api/transactions/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var result = await resp.json();
+
+    if (result.success) {
+      showToast('✅ 交易已创建', 'success');
+      // 重置表单
+      resetUpload();
+    } else {
+      showOcrFormError(result.message || '创建交易失败');
+    }
+  } catch (e) {
+    showOcrFormError('网络错误，请重试');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✅ 确认记账';
+  }
+}
+
+function showOcrFormError(msg) {
+  var el = $('ocrErrorMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+</script>
+{% endblock %}

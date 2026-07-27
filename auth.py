@@ -186,4 +186,9 @@ def init_auth_routes(app, config):
     @app.route('/logout')
     def auth_logout():
         session.clear()
+        # 强制跳转到登录页，确保入口编码前缀正确
+        from config import get_config
+        cfg = get_config()
+        if cfg.WEB_ENTRY_CODE:
+            return redirect(f'/{cfg.WEB_ENTRY_CODE}/login')
         return redirect(url_for('auth_login'))

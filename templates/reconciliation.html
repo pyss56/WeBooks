@@ -6,7 +6,10 @@
 <p class="subtitle">创建和管理对账</p>
 
 <!-- 查询区域 -->
-<div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
+<div class="filter-toggle-bar">
+  <button class="btn btn-sm btn-outline" onclick="toggleFilter()" id="filterToggleBtn" style="font-size:12px;">🔍 查询条件</button>
+</div>
+<div id="filterArea" style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:20px;">
   <div class="recon-filter-grid" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
     <div>
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">对账号</label>
@@ -31,10 +34,13 @@
     </div>
     <div class="recon-filter-actions">
       <button class="btn btn-primary" onclick="loadList()">🔍 查询</button>
-      <button class="btn btn-primary" id="createBtn">➕ 创建对账</button>
+      <button class="btn btn-primary btn-mobile-create" id="createBtn">➕ 创建对账</button>
     </div>
   </div>
 </div>
+
+<!-- 移动端浮动创建按钮 -->
+<button class="btn btn-primary mobile-create-fab" id="mobileCreateBtn" onclick="showCreateDialog()">➕</button>
 
 <!-- 列表区域 -->
 <div class="recon-table-wrap" style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
@@ -298,6 +304,30 @@
     .recon-filter-grid { grid-template-columns: 1fr !important; }
   }
 
+  @media (max-width: 768px) {
+    .filter-toggle-bar { display: block; margin-bottom: 12px; }
+    #filterArea { display: none; }
+    #filterArea.show { display: block; }
+    .mobile-create-fab { display: flex !important; }
+  }
+  @media (min-width: 769px) {
+    .filter-toggle-bar { display: none !important; }
+    .mobile-create-fab { display: none !important; }
+    .btn-mobile-create { display: inline-block !important; }
+  }
+  @media (max-width: 768px) {
+    .btn-mobile-create { display: none !important; }
+  }
+  /* 移动端浮动创建按钮 */
+  .mobile-create-fab {
+    display: none;
+    position: fixed; bottom: 70px; right: 16px; z-index: 900;
+    width: 56px; height: 56px; border-radius: 50%;
+    font-size: 24px; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    padding: 0;
+  }
+
   /* ── 分页手机适配 ── */
   @media (max-width: 768px) {
     .recon-pagination { gap: 6px !important; }
@@ -427,29 +457,37 @@ function renderReconCards(list) {
     var statusClass = item.status === '确认' ? 'status-confirmed' : (item.status === '取消' ? 'status-cancelled' : 'status-draft');
     var canEdit = item.status === '草稿';
     var balanceClass = parseInt(item.balance_amount || 0) >= 0 ? 'amt-income' : 'amt-expense';
-    html += '<div class="recon-card">';
-    html += '  <div class="recon-card-top">';
-    html += '    <a href="javascript:void(0)" onclick="openEdit(\'' + item.reconciliation_no + '\')" class="recon-card-no">#' + escapeHtml(item.reconciliation_no) + '</a>';
-    html += '    <span class="status-badge ' + statusClass + '">' + escapeHtml(item.status) + '</span>';
-    html += '  </div>';
-    html += '  <div class="recon-card-amounts">';
-    html += '    <span class="amt-income">+¥' + fmtMoney(item.income_amount) + '</span>';
-    html += '    <span class="amt-expense">-¥' + fmtMoney(item.expense_amount) + '</span>';
-    html += '    <span class="' + balanceClass + '" style="font-weight:600;">=¥' + fmtMoney(item.balance_amount) + '</span>';
-    html += '  </div>';
-    html += '  <div class="recon-card-meta">';
-    html += '    <span>✔️ ' + escapeHtml(item.confirm_flag) + '</span>';
-    html += '    <span>📅 ' + escapeHtml(item.created_at) + '</span>';
-    html += '  </div>';
-    html += '  <div class="recon-card-actions">';
-    html += '    <button class="op-btn edit" ' + (canEdit ? 'onclick="openEdit(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>✏️ 编辑</button>';
-    html += '    <button class="op-btn confirm" ' + (canEdit ? 'onclick="confirmRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>✅ 确认</button>';
-    html += '    <button class="op-btn cancel" ' + (canEdit ? 'onclick="cancelRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>❌ 取消</button>';
-    html += '    <button class="op-btn chart" onclick="showCategoryChart(\'' + item.reconciliation_no + '\')">📊 汇总</button>';
+    html += '<div class="recon-card" style="padding:0;">';
+    html += '  <div class="card-swipe-wrap" style="border-radius:10px;">';
+    html += '    <div class="card-swipe-inner">';
+    html += '      <div style="flex:1 0 100%;width:100%;padding:14px 16px;">';
+    html += '        <div class="recon-card-top">';
+    html += '          <a href="javascript:void(0)" onclick="openEdit(\'' + item.reconciliation_no + '\')" class="recon-card-no">#' + escapeHtml(item.reconciliation_no) + '</a>';
+    html += '          <span class="status-badge ' + statusClass + '">' + escapeHtml(item.status) + '</span>';
+    html += '        </div>';
+    html += '        <div class="recon-card-amounts">';
+    html += '          <span class="amt-income">+¥' + fmtMoney(item.income_amount) + '</span>';
+    html += '          <span class="amt-expense">-¥' + fmtMoney(item.expense_amount) + '</span>';
+    html += '          <span class="' + balanceClass + '" style="font-weight:600;">=¥' + fmtMoney(item.balance_amount) + '</span>';
+    html += '        </div>';
+    html += '        <div class="recon-card-meta">';
+    html += '          <span>✔️ ' + escapeHtml(item.confirm_flag) + '</span>';
+    html += '          <span>📅 ' + escapeHtml(item.created_at) + '</span>';
+    html += '        </div>';
+    html += '      </div>';
+    html += '      <div class="card-actions" style="padding:14px 10px;">';
+    html += '        <button class="op-btn edit" ' + (canEdit ? 'onclick="openEdit(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>✏️</button>';
+    html += '        <button class="op-btn confirm" ' + (canEdit ? 'onclick="confirmRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>✅</button>';
+    html += '        <button class="op-btn cancel" ' + (canEdit ? 'onclick="cancelRecon(\'' + item.reconciliation_no + '\')"' : 'disabled') + '>❌</button>';
+    html += '        <button class="op-btn chart" onclick="showCategoryChart(\'' + item.reconciliation_no + '\')">📊</button>';
+    html += '      </div>';
+    html += '    </div>';
+    html += '    <div class="swipe-hint"></div>';
     html += '  </div>';
     html += '</div>';
   });
   container.innerHTML = html;
+  initSwipeCards(container);
 }
 
 async function showCreateDialog() {
