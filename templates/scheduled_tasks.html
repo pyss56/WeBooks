@@ -150,7 +150,7 @@ LIMIT 10"></textarea>
             <div style="font-size:11px;color:#999;margin-top:4px;">运行时自动向勾选用户已启用「接受推送」的平台账号发送</div>
         </div>
         <div class="btns">
-            <button class="btn btn-outline" onclick="closePushTargetModal()">取消</button>
+            <button class="btn btn-outline" onclick="closeModal(this)">取消</button>
             <button class="btn btn-primary" onclick="confirmPushTargets()">确定</button>
         </div>
     </div>
@@ -312,16 +312,14 @@ function showPushTargetModal() {
     document.getElementById('pushTargetModal').classList.add('active');
 }
 
-function closePushTargetModal() {
-    document.getElementById('pushTargetModal').classList.remove('active');
-}
+
 
 function confirmPushTargets() {
     // 从复选框读取选择，写入隐藏字段
     const raw = getPushUserJson();
     document.getElementById('editPushUser').value = raw;
     updatePushUserDisplay();
-    closePushTargetModal();
+    document.getElementById('pushTargetModal').classList.remove('active');
 }
 
 function getPushUserJson() {
@@ -763,7 +761,7 @@ document.getElementById('editModal').addEventListener('click', function(e) {
     if (e.target === this) closeEditModal();
 });
 document.getElementById('pushTargetModal').addEventListener('click', function(e) {
-    if (e.target === this) closePushTargetModal();
+    if (e.target === this) document.getElementById('pushTargetModal').classList.remove('active');
 });
 
 let _runningJobs = {};

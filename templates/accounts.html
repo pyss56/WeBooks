@@ -89,6 +89,31 @@
         </div>
     </div>
 </div>
+
+<!-- Adjust Balance Modal -->
+<div class="modal-overlay" id="adjustModal">
+    <div class="modal" style="width:400px;">
+        <h3>💰 余额调整</h3>
+        <input type="hidden" id="adjustAccountId">
+        <div class="field">
+            <label>账户</label>
+            <div id="adjustAccountDisplay" style="padding:10px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;color:#555;"></div>
+        </div>
+        <div class="field">
+            <label>金额（元）<br><span style="font-size:11px;color:#999;font-weight:400;">正数=增加，负数=减少</span></label>
+            <input type="number" id="adjustAmount" step="0.01" placeholder="例如：100 或 -50" style="width:100%;padding:10px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;">
+        </div>
+        <div class="field">
+            <label>备注（可选）</label>
+            <input type="text" id="adjustComment" placeholder="调整原因" style="width:100%;padding:10px 12px;border:1px solid #d9d9d9;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;">
+        </div>
+        <div id="adjustError" style="display:none;background:#fce4ec;color:#c62828;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:12px;"></div>
+        <div class="btns">
+            <button class="btn btn-outline" onclick="closeAdjustModal()">取消</button>
+            <button class="btn btn-primary" id="adjustSubmitBtn" onclick="submitAdjustBalance()">确认调整</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_style %}
@@ -110,8 +135,9 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     flex: 1; min-width: 0;
 }
-.parent-row .balance { font-size: 14px; font-weight: 700; color: #2e7d32; white-space: nowrap; margin-left: 8px; flex-shrink: 0; }
-.parent-row .balance.liability { color: #c62828; }
+.parent-row .balance { font-size: 14px; font-weight: 700; white-space: nowrap; margin-left: 8px; flex-shrink: 0; }
+.parent-row .balance.balance-positive { color: #2e7d32; }
+.parent-row .balance.balance-negative { color: #c62828; }
 .parent-row .actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 .child-list { padding: 0; }
 .child-item {
@@ -128,9 +154,15 @@
 .child-item:last-child { border-bottom: none; }
 .child-item .name { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .child-item .sub-dot { color: #ccc; margin-right: 6px; }
-.child-item .balance { font-size: 13px; font-weight: 600; color: #2e7d32; white-space: nowrap; margin-left: 8px; flex-shrink: 0; }
-.child-item .balance.liability { color: #c62828; }
+.child-item .balance { font-size: 13px; font-weight: 600; white-space: nowrap; margin-left: 8px; flex-shrink: 0; }
+.child-item .balance.balance-positive { color: #2e7d32; }
+.child-item .balance.balance-negative { color: #c62828; }
 .child-item .actions { margin-left: auto; display: flex; gap: 6px; }
+.balance-blur .balance {
+  filter: blur(6px);
+  user-select: none;
+  cursor: default;
+}
 .loading { text-align: center; padding: 40px; color: #999; }
 .empty-msg { padding: 40px 24px; text-align: center; color: #999; font-size: 14px; }
 .error-msg { color: #c62828; background: #fce4ec; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
@@ -332,6 +364,7 @@ async function loadAccounts() {
             return;
         }
         const accounts = dataAcc.data || [];
+        window._loadedAccountsData = accounts;
         const bindings = dataBind.success ? (dataBind.bindings || []) : [];
         // account_id → [user_name]
         const bindingMap = {};
@@ -339,7 +372,9 @@ async function loadAccounts() {
             if (!bindingMap[b.account_id]) bindingMap[b.account_id] = [];
             bindingMap[b.account_id].push(b.user_name);
         }
-        let html = '<div class="toolbar"><button class="btn btn-primary" onclick="showAddModal()">➕ 新增账户</button></div>';
+        var _showBal = localStorage.getItem('accounts_show_balance') === '1';
+        var balBtnText = _showBal ? '🙈 隐藏余额' : '👁️ 显示余额';
+        let html = '<div class="toolbar"><button class="btn btn-primary" onclick="showAddModal()">➕ 新增账户</button><button class="btn btn-outline" onclick="toggleBalance()" id="balanceToggleBtn">' + balBtnText + '</button></div>';
         if (accounts.length === 0) {
             html += '<div class="empty-msg">暂无账户</div>';
         } else {
@@ -357,10 +392,11 @@ async function loadAccounts() {
                 const catName = _accountCategories[acc.category]?.name || '其他';
                 const isLiability = [3, 9, 10].includes(acc.category);
                 function _acctRow(label, extra, bal, isSub) {
+                    var balCls = bal < 0 ? ' balance-negative' : bal > 0 ? ' balance-positive' : '';
                     var r = '<div class="parent-row"' + (isSub ? ' style="padding-left:36px;"' : '') + '>';
                     r += '<span class="acct-name">' + label + '</span>';
                     if (extra) r += '<span class="acct-desc">' + extra + '</span>';
-                    r += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(bal) + '</span>';
+                    r += '<span class="balance' + balCls + '">' + fmt(bal) + '</span>';
                     return r;
                 }
                 function _acctActions(btns) {
@@ -384,13 +420,19 @@ async function loadAccounts() {
                     parentBtns.push(`<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${acc.id}','${escapeHtml(acc.name)}')" title="绑定用户">👥</button>`);
                 }
                 parentBtns.push(`<button class="btn btn-outline btn-sm" onclick="showAddSubAccountModal('${acc.id}','${escapeHtml(acc.name)}')" title="添加子账户">➕</button>`);
+                parentBtns.push(`<button class="btn btn-outline btn-sm" onclick="showAdjustBalanceModal('${acc.id}')" title="调整余额">💰</button>`);
                 parentBtns.push(`<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${acc.id}','${escapeHtml(acc.name)}')">🗑️</button>`);
 
                 var pLabel = '<i class="' + iconCss + '" style="color:#' + color + ';"></i> ' + escapeHtml(acc.name) + (acc.hidden ? ' <span style="font-size:10px;color:#bbb;">👁️‍🗨️</span>' : '');
                 var pExtra = catName + ' · ' + currency + (acc.comment ? ' · ' + escapeHtml(acc.comment) : '') + (boundUsers.length ? ' · 👥 ' + boundUsers.map(t => escapeHtml(t)).join(',') : '');
                 if (_mobile) {
                     html += '<div class="card-swipe-wrap" style="border-radius:0;"><div class="card-swipe-inner">';
-                    html += '<div style="flex:1 0 100%;width:100%;">' + _acctRow(pLabel, pExtra, balance, false) + '</div>';
+                    html += '<div style="flex:1 0 100%;width:100%;"><div class="parent-row" style="border:none;">';
+                    html += '<span class="acct-name">' + pLabel + '</span>';
+                    html += '<span class="acct-desc">' + pExtra + '</span>';
+                    var balCls2 = balance < 0 ? ' balance-negative' : balance > 0 ? ' balance-positive' : '';
+                    html += '<span class="balance' + balCls2 + '">' + fmt(balance) + '</span>';
+                    html += '</div></div>';
                     html += '<div class="card-actions" style="padding:10px;">' + parentBtns.join('') + '</div></div>';
                     html += '<div class="swipe-hint"></div></div>';
                 } else {
@@ -409,19 +451,22 @@ async function loadAccounts() {
                         var sBtns = [
                             `<button class="btn btn-outline btn-sm" onclick="showEditModal('${sub.id}')">✏️</button>`,
                             `<button class="btn btn-outline btn-sm" onclick="showBindUserModal('${sub.id}','${escapeHtml(sub.name)}')" title="绑定用户">👥</button>`,
+                            `<button class="btn btn-outline btn-sm" onclick="showAdjustBalanceModal('${sub.id}')" title="调整余额">💰</button>`,
                             `<button class="btn btn-danger btn-sm" onclick="showDeleteModal('${sub.id}','${escapeHtml(sub.name)}')">🗑️</button>`,
                         ];
                         if (_mobile) {
                             html += '<div class="card-swipe-wrap" style="border-radius:0;"><div class="card-swipe-inner">';
                             html += '<div style="flex:1 0 100%;width:100%;"><div class="child-item" style="border:none;padding:8px 16px 8px 36px;">';
                             html += '<span class="name">' + sLabel + '</span>';
-                            html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(sb) + '</span></div></div>';
+                            var sbCls = sb < 0 ? ' balance-negative' : sb > 0 ? ' balance-positive' : '';
+                            html += '<span class="balance' + sbCls + '">' + fmt(sb) + '</span></div></div>';
                             html += '<div class="card-actions" style="padding:10px;">' + sBtns.join('') + '</div></div>';
                             html += '<div class="swipe-hint"></div></div>';
                         } else {
                             html += '<div class="child-item">';
                             html += '<span class="name">' + sLabel + '</span>';
-                            html += '<span class="balance' + (isLiability ? ' liability' : '') + '">' + fmt(sb) + '</span>';
+                            var sbCls2 = sb < 0 ? ' balance-negative' : sb > 0 ? ' balance-positive' : '';
+                            html += '<span class="balance' + sbCls2 + '">' + fmt(sb) + '</span>';
                             html += '<span class="actions">' + sBtns.join('') + '</span></div>';
                         }
                     }
@@ -431,6 +476,9 @@ async function loadAccounts() {
         }
         container.innerHTML = html;
         if (window.innerWidth < 769) initSwipeCards(container);
+        // 应用余额隐藏状态
+        var _showBal = localStorage.getItem('accounts_show_balance') === '1';
+        if (!_showBal) container.classList.add('balance-blur');
     } catch (e) {
         container.innerHTML = '<div class="error-msg">❌ 加载失败: ' + escapeHtml(e.message) + '</div>';
     }
@@ -689,6 +737,98 @@ async function confirmDelete() {
     } finally {
         btn.disabled = false; btn.textContent = '删除';
     }
+}
+
+function toggleBalance() {
+  var container = document.getElementById('account-container');
+  var btn = document.getElementById('balanceToggleBtn');
+  var show = container.classList.toggle('balance-blur');
+  if (!show) {
+    localStorage.setItem('accounts_show_balance', '1');
+    if (btn) btn.textContent = '🙈 隐藏余额';
+  } else {
+    localStorage.setItem('accounts_show_balance', '0');
+    if (btn) btn.textContent = '👁️ 显示余额';
+  }
+}
+
+/* ── 余额调整 ── */
+function showAdjustBalanceModal(accountId) {
+  document.getElementById('adjustAccountId').value = accountId;
+  document.getElementById('adjustAmount').value = '';
+  document.getElementById('adjustComment').value = '';
+  document.getElementById('adjustError').style.display = 'none';
+  document.getElementById('adjustAccountDisplay').textContent = '💰 加载中...';
+  // 查找账户名称
+  var accounts = window._loadedAccountsData;
+  function resolve(arr, id) {
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i].id === id) return arr[i].name;
+      if (arr[i].subAccounts) {
+        for (var j = 0; j < arr[i].subAccounts.length; j++) {
+          if (arr[i].subAccounts[j].id === id) return arr[i].subAccounts[j].name;
+        }
+      }
+    }
+    return null;
+  }
+  if (accounts && accounts.length) {
+    var name = resolve(accounts, accountId);
+    document.getElementById('adjustAccountDisplay').textContent = '💰 ' + (name || accountId);
+  } else {
+    // 数据未加载时通过 API 获取
+    fetch('/api/accounts').then(function(r) { return r.json(); }).then(function(d) {
+      if (d.success && d.data) {
+        window._loadedAccountsData = d.data;
+        var name = resolve(d.data, accountId);
+        document.getElementById('adjustAccountDisplay').textContent = '💰 ' + (name || accountId);
+      }
+    }).catch(function() {
+      document.getElementById('adjustAccountDisplay').textContent = '💰 ' + accountId;
+    });
+  }
+  document.getElementById('adjustModal').classList.add('active');
+  setTimeout(function() { document.getElementById('adjustAmount').focus(); }, 100);
+}
+
+function closeAdjustModal() {
+  document.getElementById('adjustModal').classList.remove('active');
+}
+
+async function submitAdjustBalance() {
+  var accountId = document.getElementById('adjustAccountId').value;
+  var amountInput = document.getElementById('adjustAmount').value;
+  var comment = document.getElementById('adjustComment').value.trim();
+  var errEl = document.getElementById('adjustError');
+
+  if (!accountId) { errEl.textContent = '请选择账户'; errEl.style.display = 'block'; return; }
+  var amount = parseFloat(amountInput);
+  if (isNaN(amount) || amount === 0) { errEl.textContent = '请输入有效金额（正数增加，负数减少）'; errEl.style.display = 'block'; return; }
+  errEl.style.display = 'none';
+
+  var btn = document.getElementById('adjustSubmitBtn');
+  btn.disabled = true; btn.textContent = '调整中...';
+  try {
+    var resp = await fetch('/api/accounts/adjust-balance', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({account_id: accountId, amount: amount, comment: comment}),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast(result.message, 'success');
+      closeAdjustModal();
+      loadAccounts();
+    } else {
+      errEl.textContent = result.message || '调整失败';
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = '网络错误: ' + e.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = '确认调整';
+  }
 }
 
 loadAccountCategories();

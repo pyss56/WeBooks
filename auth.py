@@ -117,7 +117,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #f
 <body>
 <div class="card">
   <h1>WeBooks</h1>
-  <div class="sub">企业微信记账助手</div>
+  <div class="sub">微记账</div>
   <form method="post" action="{% if entry_code %}/{{ entry_code }}{% endif %}/login">
     <div class="field">
       <label>用户名</label>

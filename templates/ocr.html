@@ -277,7 +277,6 @@
 {% endblock %}
 
 {% block extra_script %}
-<script>
 var EXPENSE_CATEGORIES = {{ expense_categories | tojson | safe }};
 var INCOME_CATEGORIES = {{ income_categories | tojson | safe }};
 var currentBillType = 'expense';
@@ -525,5 +524,4 @@ function showOcrFormError(msg) {
   el.textContent = msg;
   el.style.display = 'block';
 }
-</script>
 {% endblock %}

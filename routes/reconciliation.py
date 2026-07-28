@@ -121,7 +121,7 @@ def api_reconciliation_remove_transactions():
 @login_required
 def api_reconciliation_cancel():
     try:
-        from db import (get_reconciliation_by_no, update_reconciliation, clear_transaction_reconciliation, get_transactions)
+        from db import (get_reconciliation_by_no, update_reconciliation, get_transactions)
         data = request.get_json() or {}
         reconciliation_no = data.get('reconciliation_no', '')
         if not reconciliation_no:
@@ -131,7 +131,7 @@ def api_reconciliation_cancel():
             return jsonify({'success': False, 'message': '对账不存在'}), 404
         txs = get_transactions(reconciliation_no=reconciliation_no)
         if txs:
-            return jsonify({'success': False, 'message': '对账有明细记录，无法取消'}), 400
+            return jsonify({'success': False, 'message': '有交易记录的对账不能取消，请先移除所有交易'}), 400
         ok = update_reconciliation(reconciliation_no, status='取消', updated_by=session.get('username', 'admin'))
         if ok:
             return jsonify({'success': True, 'message': '已取消'})

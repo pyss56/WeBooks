@@ -9,6 +9,9 @@ from db import invalidate_account_cache
 logger = logging.getLogger(__name__)
 bp = Blueprint('accounts', __name__)
 
+# 余额调整科目缓存（进程级，避免重复查库）
+_adj_cat_cache = {}
+
 # 加载账户图标映射
 _ACCOUNT_ICONS_LIST = []
 _acc_icons_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'account_icons.json')
@@ -22,11 +25,16 @@ except Exception as e:
 
 @bp.route('/api/accounts', methods=['GET'])
 def api_accounts():
-    """获取账户列表"""
+    """获取账户列表
+    查询参数：
+      hidden  - 1=包含隐藏账户，0=不包含（默认）
+      user_code   - 用户编码，按可见性过滤
+    """
     try:
-        from books.client import BookkeepingClient
-        bk = BookkeepingClient()
-        accounts = bk.get_accounts()
+        show_hidden = request.args.get('hidden', '0') == '1'
+        user_code = request.args.get('user_code', '').strip() or None
+        from db import query_accounts
+        accounts = query_accounts(user_code=user_code, show_hidden=show_hidden, flat=False)
         return jsonify({'success': True, 'data': accounts})
     except Exception as e:
         logger.error(f"获取账户列表异常: {e}")
@@ -208,7 +216,7 @@ def api_save_user_accounts():
             # 从无绑定变为有绑定，视为移除了其他所有用户的权限
             conn = get_connection()
             try:
-                cur = conn.execute("SELECT user_code FROM user_default_account WHERE account_id=? OR income_account_id=?", (account_id, account_id))
+                cur = conn.execute("SELECT user_code FROM user_default_transaction WHERE account_id=? OR income_account_id=?", (account_id, account_id))
                 for row in cur.fetchall():
                     if row['user_code'] not in new_codes:
                         check_codes.add(row['user_code'])
@@ -222,7 +230,7 @@ def api_save_user_accounts():
                 placeholders = ','.join('?' for _ in check_codes)
                 cur = conn.execute(f"""
                     SELECT user_code, account_id, income_account_id
-                    FROM user_default_account
+                    FROM user_default_transaction
                     WHERE user_code IN ({placeholders})
                       AND (account_id=? OR income_account_id=?)
                 """, list(check_codes) + [account_id, account_id])
@@ -251,7 +259,7 @@ def api_save_user_accounts():
         updated_by = session.get('username', 'admin')
         ok = set_user_accounts(account_id, bindings, updated_by=updated_by)
 
-        # 如果已确认，清空 user_default_account 中的引用
+        # 如果已确认，清空 user_default_transaction 中的引用
         if ok and conflicts and confirmed:
             conn = get_connection()
             try:
@@ -263,7 +271,7 @@ def api_save_user_accounts():
                     if '收入' in c['directions']:
                         updates.append("income_account_id=NULL")
                     if updates:
-                        sql = f"UPDATE user_default_account SET {', '.join(updates)}, updated_at=datetime('now','localtime') WHERE user_code=?"
+                        sql = f"UPDATE user_default_transaction SET {', '.join(updates)}, updated_at=datetime('now','localtime') WHERE user_code=?"
                         conn.execute(sql, (user_code,))
                 conn.commit()
             finally:
@@ -312,3 +320,67 @@ def api_account_icons():
         return jsonify({'success': True, 'icons': result})
     except Exception:
         return jsonify({'success': True, 'icons': _ACCOUNT_ICONS_LIST})
+
+
+@bp.route('/api/accounts/adjust-balance', methods=['POST'])
+@login_required
+def api_adjust_balance():
+    """余额调整：创建不计入预算的调整交易"""
+    data = request.get_json() or {}
+    account_id = data.get('account_id', '').strip()
+    try:
+        amount = float(data.get('amount', 0))
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'message': '金额格式错误'}), 400
+    comment = (data.get('comment') or '').strip()
+    user_code = session.get('user_code', '')
+    created_by = session.get('username', '')
+
+    if not account_id:
+        return jsonify({'success': False, 'message': '请选择账户'}), 400
+    if amount == 0:
+        return jsonify({'success': False, 'message': '金额不能为0'}), 400
+
+    from books.client import BookkeepingClient
+    bk = BookkeepingClient()
+
+    # 查找或创建"余额调整"科目（模块级缓存，避免重复查）
+    cat_type = 'income' if amount > 0 else 'expense'
+    if _adj_cat_cache.get(cat_type) is None:
+        cat = bk.find_category_by_name('余额调整', category_type=cat_type)
+        if not cat:
+            cat = bk.create_category('余额调整', category_type=cat_type, parent_id='0',
+                                     icon='1', color='888888', comment='余额调整专用科目',
+                                     created_by=created_by)
+            if not cat:
+                return jsonify({'success': False, 'message': '创建余额调整科目失败'}), 500
+        _adj_cat_cache[cat_type] = cat
+    else:
+        cat = _adj_cat_cache[cat_type]
+
+    category_id = cat['id']
+    transaction_type = 2 if amount > 0 else 3  # 2=收入, 3=支出
+    abs_amount = abs(amount)
+
+    from datetime import datetime
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    adj_comment = f"💰 余额调整{'（' + comment + '）' if comment else ''}"
+
+    result = bk.create_transaction(
+        category_id=category_id,
+        amount=abs_amount,
+        account_id=account_id,
+        comment=adj_comment,
+        transaction_time=now_str,
+        transaction_type=transaction_type,
+        created_by=created_by,
+        user_code=user_code,
+        source='web',
+        source_user=created_by,
+        is_adjustment=1,
+    )
+
+    if result.get('success'):
+        return jsonify({'success': True, 'message': f'✅ 余额已调整：{adj_comment}'})
+    else:
+        return jsonify({'success': False, 'message': result.get('errorMessage', '调整失败')}), 500

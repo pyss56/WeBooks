@@ -37,11 +37,25 @@
       </select>
     </div>
     <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">账户</label>
+      <select id="queryAcctId" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div>
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">是否对账</label>
       <select id="queryRecon" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
         <option value="">全部</option>
         <option value="否">未对账</option>
         <option value="是">已对账</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">余额调整</label>
+      <select id="queryAdjust" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        <option value="">全部</option>
+        <option value="0">仅普通交易</option>
+        <option value="1">仅调整记录</option>
       </select>
     </div>
     <div>
@@ -60,6 +74,74 @@
       <button class="btn btn-primary" onclick="loadBills(1)">🔍 查询</button>
       <button class="btn btn-outline" onclick="resetQuery()">🔄 重置</button>
     </div>
+  </div>
+</div>
+
+<!-- 移动端浮动按钮 -->
+<button class="mobile-fab mobile-fab-refresh" id="mobileRefreshBtn" onclick="loadBills(1)">🔄</button>
+<button class="mobile-fab mobile-fab-search" id="mobileSearchBtn" onclick="toggleSearchSheet()">🔍</button>
+
+<!-- 移动端底部搜索面板 -->
+<div class="search-sheet" id="searchSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">🔍 查询条件</div>
+  <div class="field">
+    <label>类型</label>
+    <select id="sheetQueryType">
+      <option value="">全部</option>
+      <option value="income">收入</option>
+      <option value="expense">支出</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>科目</label>
+    <select id="sheetQueryAccount">
+      <option value="">全部</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>记账人</label>
+    <select id="sheetQueryUser">
+      <option value="">全部</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>账户</label>
+    <select id="sheetQueryAcctId">
+      <option value="">全部</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>是否对账</label>
+    <select id="sheetQueryRecon">
+      <option value="">全部</option>
+      <option value="否">未对账</option>
+      <option value="是">已对账</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>余额调整</label>
+    <select id="sheetQueryAdjust">
+      <option value="">全部</option>
+      <option value="0">仅普通交易</option>
+      <option value="1">仅调整记录</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>记账时间从</label>
+    <input type="date" id="sheetTimeFrom">
+  </div>
+  <div class="field">
+    <label>至</label>
+    <input type="date" id="sheetTimeTo">
+  </div>
+  <div class="field">
+    <label>对账号</label>
+    <input type="text" id="sheetReconNo" placeholder="输入对账号">
+  </div>
+  <div class="sheet-actions">
+    <button class="btn btn-outline" onclick="resetSheetSearch()">🔄 重置</button>
+    <button class="btn btn-primary" onclick="submitSheetSearch()">🔍 查询</button>
   </div>
 </div>
 
@@ -157,7 +239,6 @@
       <input type="text" id="editTime" style="padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;width:100%;" placeholder="YYYY-MM-DD HH:MM:SS">
     </div>
     <div class="btns">
-      <button class="btn btn-danger btn-sm" id="deleteBtn" onclick="confirmDeleteBill()" style="margin-right:auto;">🗑️ 删除</button>
       <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
       <button class="btn btn-primary" id="editSubmitBtn" onclick="submitEdit()">保存</button>
     </div>
@@ -277,6 +358,7 @@
     transition: box-shadow 0.15s;
   }
   .bill-card:active { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .card-swipe-wrap .bill-card { border: 1px solid #eee; }
   .card-row { margin-bottom: 6px; }
   .card-row:last-child { margin-bottom: 0; }
   .card-top {
@@ -303,12 +385,15 @@
     .table-wrap { display: none; }
     .bills-cards { display: block; }
     .pc-only { display: none !important; }
-    .filter-toggle-bar { display: block; margin-bottom: 12px; }
+    .filter-toggle-bar { display: none !important; }
     #filterArea { display: none; }
     #filterArea.show { display: block; }
+    .mobile-fab { display: flex !important; }
   }
   @media (min-width: 769px) {
     .filter-toggle-bar { display: none !important; }
+    .mobile-fab { display: none !important; }
+    .search-sheet { display: none; }
   }
 
   @media (max-width: 480px) {
@@ -317,6 +402,37 @@
     .main-content { padding: 12px !important; }
     .summary-cards > div > div:last-child { font-size: 16px !important; }
   }
+
+  /* ── 移动端浮动按钮 ── */
+  .mobile-fab {
+    display: none;
+    position: fixed; right: 16px; z-index: 900;
+    width: 56px; height: 56px; border-radius: 50%;
+    font-size: 24px; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    padding: 0; border: none; cursor: pointer;
+  }
+  .mobile-fab-search { bottom: 136px; background: rgba(26,115,232,0.5); color: #fff; }
+  .mobile-fab-refresh { bottom: 202px; background: rgba(26,115,232,0.5); color: #fff; }
+
+  /* ── 移动端底部搜索面板 ── */
+  .search-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 950;
+    background: #fff; border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+    padding: 20px; padding-bottom: calc(220px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .search-sheet.open { transform: translateY(0); }
+  .search-sheet .sheet-handle { width: 36px; height: 4px; background: #ddd; border-radius: 2px; margin: 0 auto 16px; }
+  .search-sheet .sheet-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; text-align: center; }
+  .search-sheet .field { margin-bottom: 14px; }
+  .search-sheet .field label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+  .search-sheet .field input, .search-sheet .field select { width: 100%; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 8px; font-size: 14px; outline: none; }
+  .search-sheet .sheet-actions { display: flex; gap: 10px; margin-top: 8px; }
+  .search-sheet .sheet-actions .btn { flex: 1; padding: 12px; border-radius: 8px; font-size: 15px; }
 </style>
 {% endblock %}
 
@@ -358,7 +474,9 @@ function resetQuery() {
   document.getElementById('queryType').value = '';
   document.getElementById('queryAccount').value = '';
   document.getElementById('queryUser').value = '';
+  document.getElementById('queryAcctId').value = '';
   document.getElementById('queryRecon').value = '';
+  document.getElementById('queryAdjust').value = '';
   document.getElementById('queryTimeFrom').value = getMonthStart();
   document.getElementById('queryTimeTo').value = getMonthEnd();
   document.getElementById('queryReconNo').value = '';
@@ -389,8 +507,12 @@ async function loadBills(page) {
     if (acct) params.set('account_filter', acct);
     const user = document.getElementById('queryUser').value;
     if (user) params.set('source_user', user);
+    const acctId = document.getElementById('queryAcctId').value;
+    if (acctId) params.set('account_id', acctId);
     const recon = document.getElementById('queryRecon').value;
     if (recon) params.set('reconciliation_flag', recon);
+    const adj = document.getElementById('queryAdjust').value;
+    if (adj) params.set('is_adjustment', adj);
     const from = document.getElementById('queryTimeFrom').value;
     const to = document.getElementById('queryTimeTo').value;
     if (from) params.set('bill_time_from', from + ' 00:00:00');
@@ -436,6 +558,7 @@ async function loadBills(page) {
     // ── 卡片（手机端） ──
     let cardsHtml = '';
     bills.forEach(b => {
+      const isAdj = b.is_adjustment === 1 || b.is_adjustment === '1';
       const typeClass = b.bill_type === 'income' ? 'type-income' : 'type-expense';
       const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
       const amtClass = parseInt(b.amount || 0) >= 0 ? 'amt-positive' : 'amt-negative';
@@ -444,7 +567,7 @@ async function loadBills(page) {
       // 表格行
       html += '<tr>';
       html += '<td style="padding:12px 14px;color:#888;font-size:12px;">' + b.id + '</td>';
-      html += '<td style="padding:12px 14px;text-align:center;"><span class="type-badge ' + typeClass + '">' + typeLabel + '</span></td>';
+      html += '<td style="padding:12px 14px;text-align:center;"><span class="type-badge ' + typeClass + '">' + typeLabel + '</span>' + (isAdj ? ' <span class="type-badge" style="background:#f3e5f5;color:#7b1fa2;">⚙️</span>' : '') + '</td>';
       html += '<td style="padding:12px 14px;">' + escapeHtml(b.category_name || '') + '</td>';
       html += '<td style="padding:12px 14px;color:#888;">' + escapeHtml(b.account_name || b.account_id || '') + '</td>';
       html += '<td style="padding:12px 14px;text-align:right;font-weight:600;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
@@ -459,8 +582,11 @@ async function loadBills(page) {
       }
       html += '</td>';
       html += '</tr>';
-      // 卡片
-      cardsHtml += '<div class="bill-card" onclick="openEditModal(' + b.id + ')">';
+      // 卡片（支持左滑操作）
+      var canOperate = !b.reconciliation_no || b.reconciliation_flag === '0';
+      cardsHtml += '<div class="card-swipe-wrap" style="border-radius:10px;margin-bottom:10px;"><div class="card-swipe-inner">';
+      cardsHtml += '<div style="flex:1 0 100%;width:100%;">';
+      cardsHtml += '<div class="bill-card" style="margin-bottom:0;border-radius:10px;" onclick="openEditModal(' + b.id + ')">';
       cardsHtml += '<div class="card-row card-top">';
       cardsHtml += '  <span class="type-badge ' + typeClass + '">' + typeLabel + '</span>';
       cardsHtml += '  <span class="card-amount ' + amtClass + '">¥' + fmtMoney(b.amount) + '</span>';
@@ -469,6 +595,9 @@ async function loadBills(page) {
       cardsHtml += '  <span><span class="card-label">科目</span>' + escapeHtml(b.category_name || '') + '</span>';
       cardsHtml += '  <span><span class="card-label">账户</span>' + escapeHtml(b.account_name || b.account_id || '') + '</span>';
       cardsHtml += '</div>';
+      if (isAdj) {
+        cardsHtml += '<div class="card-row card-comment" style="color:#7b1fa2;">⚙️ 余额调整</div>';
+      }
       if (b.comment) {
         cardsHtml += '<div class="card-row card-comment" title="' + escapeHtml(b.comment) + '">📝 ' + escapeHtml(b.comment) + '</div>';
       }
@@ -480,10 +609,20 @@ async function loadBills(page) {
         cardsHtml += '  <span class="card-recon-no">#' + escapeHtml(b.reconciliation_no) + '</span>';
       }
       cardsHtml += '</div>';
-      cardsHtml += '</div>';
+      cardsHtml += '</div>'; // bill-card
+      cardsHtml += '</div>'; // flex content
+      cardsHtml += '<div class="card-actions" style="padding:10px;">';
+      cardsHtml += '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditModal(' + b.id + ')" title="编辑">✏️</button>';
+      if (canOperate) {
+        cardsHtml += '<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteBillById(' + b.id + ')" title="删除">🗑️</button>';
+      }
+      cardsHtml += '</div></div>';
+      cardsHtml += '<div class="swipe-hint"></div></div>';
     });
     tbody.innerHTML = html;
-    document.getElementById('billsCards').innerHTML = cardsHtml;
+    var cardsEl = document.getElementById('billsCards');
+    cardsEl.innerHTML = cardsHtml;
+    if (window.innerWidth < 769) initSwipeCards(cardsEl);
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
   }
@@ -493,6 +632,58 @@ let editingBillId = null;
 let billsData = [];
 let editBillType = 'expense';
 let _totalPages = 1;
+
+/* ── 移动端搜索面板 ── */
+function toggleSearchSheet() {
+  // 同步搜索面板中的下拉选项到主页面查询条件
+  syncSheetSelect('sheetQueryType', 'queryType');
+  syncSheetSelect('sheetQueryAccount', 'queryAccount');
+  syncSheetSelect('sheetQueryUser', 'queryUser');
+  syncSheetSelect('sheetQueryAcctId', 'queryAcctId');
+  syncSheetSelect('sheetQueryRecon', 'queryRecon');
+  syncSheetSelect('sheetQueryAdjust', 'queryAdjust');
+  document.getElementById('sheetTimeFrom').value = document.getElementById('queryTimeFrom').value;
+  document.getElementById('sheetTimeTo').value = document.getElementById('queryTimeTo').value;
+  document.getElementById('sheetReconNo').value = document.getElementById('queryReconNo').value;
+  document.getElementById('searchSheet').classList.toggle('open');
+}
+function closeSearchSheet() {
+  document.getElementById('searchSheet').classList.remove('open');
+}
+function syncSheetSelect(sheetId, mainId) {
+  var sheetSel = document.getElementById(sheetId);
+  var mainSel = document.getElementById(mainId);
+  if (sheetSel && mainSel) sheetSel.value = mainSel.value;
+}
+function syncMainSelect(mainId, sheetId) {
+  var mainSel = document.getElementById(mainId);
+  var sheetSel = document.getElementById(sheetId);
+  if (mainSel && sheetSel) mainSel.value = sheetSel.value;
+}
+function submitSheetSearch() {
+  syncMainSelect('queryType', 'sheetQueryType');
+  syncMainSelect('queryAccount', 'sheetQueryAccount');
+  syncMainSelect('queryUser', 'sheetQueryUser');
+  syncMainSelect('queryAcctId', 'sheetQueryAcctId');
+  syncMainSelect('queryRecon', 'sheetQueryRecon');
+  syncMainSelect('queryAdjust', 'sheetQueryAdjust');
+  document.getElementById('queryTimeFrom').value = document.getElementById('sheetTimeFrom').value;
+  document.getElementById('queryTimeTo').value = document.getElementById('sheetTimeTo').value;
+  document.getElementById('queryReconNo').value = document.getElementById('sheetReconNo').value.trim();
+  closeSearchSheet();
+  loadBills(1);
+}
+function resetSheetSearch() {
+  document.getElementById('sheetQueryType').value = '';
+  document.getElementById('sheetQueryAccount').value = '';
+  document.getElementById('sheetQueryUser').value = '';
+  document.getElementById('sheetQueryAcctId').value = '';
+  document.getElementById('sheetQueryRecon').value = '';
+  document.getElementById('sheetQueryAdjust').value = '';
+  document.getElementById('sheetTimeFrom').value = '';
+  document.getElementById('sheetTimeTo').value = '';
+  document.getElementById('sheetReconNo').value = '';
+}
 
 function goLastPage() {
   loadBills(_totalPages);
@@ -632,16 +823,12 @@ async function submitEdit() {
   }
 }
 
-function confirmDeleteBill() {
-  if (!editingBillId) return;
+function deleteBillById(billId) {
   if (!confirm('确定要删除此账单？\n该操作会同步从ledger中删除对应交易，不可恢复。')) return;
-  const btn = document.getElementById('deleteBtn');
-  btn.disabled = true;
-  btn.textContent = '删除中...';
   fetch('/api/transactions/delete', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({id: editingBillId}),
+    body: JSON.stringify({id: billId}),
   })
     .then(r => r.json())
     .then(result => {
@@ -653,30 +840,37 @@ function confirmDeleteBill() {
         showToast('❌ ' + result.message, 'error');
       }
     })
-    .catch(e => showToast('❌ 删除失败: ' + e.message, 'error'))
-    .finally(() => { btn.disabled = false; btn.textContent = '🗑️ 删除'; });
+    .catch(e => showToast('❌ 删除失败: ' + e.message, 'error'));
 }
 
 // 初始化加载科目和用户下拉
 async function initFilters() {
   try {
-    const [acctResp, userResp] = await Promise.all([
+    const [acctResp, userResp, acctListResp] = await Promise.all([
       fetch('/api/bills/accounts'),
-      fetch('/api/users/list?status=1')
+      fetch('/api/users/list?status=1'),
+      fetch('/api/accounts?hidden=1')
     ]);
     const acctResult = await acctResp.json();
     const userResult = await userResp.json();
+    const acctListResult = await acctListResp.json();
     if (acctResult.success) {
       const sel = document.getElementById('queryAccount');
+      const sheetSel = document.getElementById('sheetQueryAccount');
       (acctResult.data || []).forEach(a => {
         const opt = document.createElement('option');
         opt.value = a;
         opt.textContent = a;
         sel.appendChild(opt);
+        const opt2 = document.createElement('option');
+        opt2.value = a;
+        opt2.textContent = a;
+        sheetSel.appendChild(opt2);
       });
     }
     if (userResult.success) {
       const sel = document.getElementById('queryUser');
+      const sheetSel = document.getElementById('sheetQueryUser');
       var userMap = {};
       (userResult.data || []).forEach(function(u) {
         userMap[u.code] = u.name;
@@ -684,6 +878,10 @@ async function initFilters() {
         opt.value = u.code;
         opt.textContent = u.name;
         sel.appendChild(opt);
+        var opt2 = document.createElement('option');
+        opt2.value = u.code;
+        opt2.textContent = u.name;
+        sheetSel.appendChild(opt2);
       });
       // 重写 loadBills 的记账人显示
       var _origRender = window._renderUser || null;
@@ -692,6 +890,21 @@ async function initFilters() {
           return userMap[code] || code || '';
         };
       }
+    }
+    if (acctListResult.success) {
+      const acctSel = document.getElementById('queryAcctId');
+      const sheetAcctSel = document.getElementById('sheetQueryAcctId');
+      function addAcctOptions(arr, targetSel) {
+        (arr || []).forEach(function(a) {
+          var opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = a.name;
+          targetSel.appendChild(opt);
+          if (a.subAccounts) addAcctOptions(a.subAccounts, targetSel);
+        });
+      }
+      addAcctOptions(acctListResult.data, acctSel);
+      addAcctOptions(acctListResult.data, sheetAcctSel);
     }
   } catch(e) {}
   loadBills(1);

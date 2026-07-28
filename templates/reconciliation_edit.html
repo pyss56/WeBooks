@@ -2,6 +2,9 @@
 {% block title %}编辑对账{% endblock %}
 
 {% block content %}
+<div class="mobile-back-bar">
+  <a href="/reconciliation" class="mobile-back-link">← 返回</a>
+</div>
 <h2>✅ 编辑对账</h2>
 <p class="subtitle">对账号：{{ reconciliation_no }}</p>
 
@@ -14,50 +17,65 @@
   </div>
 
   <div id="editArea" style="display:none;">
-    <!-- 查询条件 -->
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:16px;background:#f9f9f9;border-radius:8px;">
-      <div>
-        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
-        <select id="editBillType" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
-          <option value="">全部</option>
-          <option value="expense">支出</option>
-          <option value="income">收入</option>
-        </select>
+    <!-- 查询条件（可折叠） -->
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;" onclick="toggleEditFilter()">
+        <span id="editFilterArrow" style="font-size:12px;color:#888;transition:transform 0.2s;">▾</span>
+        <span style="font-size:13px;color:#888;font-weight:600;">查询条件</span>
+        <span style="font-size:11px;color:#bbb;">（点击展开/折叠）</span>
       </div>
-      <div>
-        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">科目</label>
-        <select id="editCategory" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
-          <option value="">全部</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">账户</label>
-        <select id="editAccount" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
-          <option value="">全部</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账人</label>
-        <select id="editSourceUser" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
-          <option value="">全部</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账时间从</label>
-        <input type="date" id="editTimeFrom" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
-      </div>
-      <div>
-        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">至</label>
-        <input type="date" id="editTimeTo" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
-      </div>
-      <div>
-        <button class="btn btn-primary btn-sm" onclick="loadAvailableBills()">🔍 查询</button>
+      <div id="editFilterBody" style="display:none;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;padding:16px;background:#f9f9f9;border-radius:8px;">
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">类型</label>
+          <select id="editBillType" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+            <option value="">全部</option>
+            <option value="expense">支出</option>
+            <option value="income">收入</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">科目</label>
+          <select id="editCategory" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">账户</label>
+          <select id="editAccount" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">余额调整</label>
+          <select id="editAdjust" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+            <option value="">全部</option>
+            <option value="0" selected>仅普通交易</option>
+            <option value="1">仅调整记录</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账人</label>
+          <select id="editSourceUser" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账时间从</label>
+          <input type="date" id="editTimeFrom" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">至</label>
+          <input type="date" id="editTimeTo" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+        </div>
+        <div>
+          <button class="btn btn-primary btn-sm" onclick="loadAvailableBills()">🔍 查询</button>
+        </div>
       </div>
     </div>
 
     <!-- 可选账单列表 -->
     <h4 style="font-size:14px;color:#333;margin-bottom:8px;">可选账单列表</h4>
-    <div style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:8px;">
+    <div class="edit-bills-table" style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:8px;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr style="background:#f5f5f5;position:sticky;top:0;">
@@ -75,29 +93,34 @@
         </tbody>
       </table>
     </div>
+    <div id="availableBillsCards" class="edit-bills-cards" style="display:none;"></div>
     <div style="text-align:right;margin-bottom:16px;">
       <button class="btn btn-primary" onclick="addSelectedBills()">➕ 添加到对账</button>
     </div>
 
     <!-- 已加入的账单 -->
     <h4 style="font-size:14px;color:#333;margin-bottom:8px;">已加入的账单</h4>
-    <div style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
+    <div class="edit-bills-table" style="max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr style="background:#f5f5f5;position:sticky;top:0;">
+            <th style="padding:8px 10px;width:36px;"><input type="checkbox" id="selectAllAdded" onchange="toggleAllAdded()"></th>
             <th style="padding:8px 10px;text-align:left;">类型</th>
             <th style="padding:8px 10px;text-align:left;">科目</th>
             <th style="padding:8px 10px;text-align:right;">金额</th>
             <th style="padding:8px 10px;text-align:left;">备注</th>
             <th style="padding:8px 10px;text-align:left;">记账人</th>
             <th style="padding:8px 10px;text-align:center;">记账时间</th>
-            <th style="padding:8px 10px;text-align:center;">操作</th>
           </tr>
         </thead>
         <tbody id="addedBillsBody">
           <tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>
         </tbody>
       </table>
+    </div>
+    <div id="addedBillsCards" class="edit-bills-cards" style="display:none;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:12px;margin-bottom:16px;">
+      <button class="btn btn-outline" id="removeSelectedBtn" onclick="removeSelectedAdded()" style="display:none;">🗑️ 移出选中</button>
     </div>
   </div>
 
@@ -121,6 +144,26 @@
   .op-btn { padding:4px 10px;border:none;border-radius:3px;font-size:11px;cursor:pointer;margin:0 2px; }
   .op-btn.del { background:#fce4ec;color:#c62828; }
   .op-btn:disabled { opacity:0.5;cursor:not-allowed; }
+  @media (max-width: 768px) {
+    .mobile-back-bar { display: block; }
+  }
+  @media (min-width: 769px) {
+    .mobile-back-bar { display: none; }
+  }
+  .mobile-back-bar { display: none; margin-bottom: 8px; }
+  .mobile-back-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 14px; color: #07c160; text-decoration: none;
+    padding: 4px 0;
+  }
+  .mobile-back-link:hover { color: #06ad56; }
+  @media (max-width: 768px) {
+    .edit-bills-table { display: none; }
+    .edit-bills-cards { display: block !important; }
+  }
+  @media (min-width: 769px) {
+    .edit-bills-cards { display: none !important; }
+  }
 </style>
 {% endblock %}
 
@@ -187,20 +230,33 @@ function renderAddedBills(bills, canDelete) {
     const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
     const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
     html += '<tr>';
+    html += '<td style="padding:6px 10px;text-align:center;"><input type="checkbox" class="added-check" value="' + b.id + '" onchange="toggleRemoveBtn()"></td>';
     html += '<td style="padding:6px 10px;">' + typeLabel + '</td>';
     html += '<td style="padding:6px 10px;">' + escapeHtml(b.category_name || '') + '</td>';
     html += '<td style="padding:6px 10px;text-align:right;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
     html += '<td style="padding:6px 10px;color:#888;">' + escapeHtml(b.comment || '') + '</td>';
     html += '<td style="padding:6px 10px;">' + escapeHtml(userMap[b.user_code] || b.user_code || '') + '</td>';
     html += '<td style="padding:6px 10px;text-align:center;font-size:11px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
-    html += '<td style="padding:6px 10px;text-align:center;">';
-    if (canDelete) {
-      html += '<button class="op-btn del" onclick="removeBill(' + b.id + ')">删除</button>';
-    }
-    html += '</td>';
-    html += '</tr>';
   });
   tbody.innerHTML = html;
+  // 卡片
+  let cardsHtml = '';
+  bills.forEach(b => {
+    const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+    const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
+    cardsHtml += '<label class="bill-card-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #f0f0f0;border-radius:8px;margin-bottom:6px;background:#fff;">';
+    cardsHtml += '<input type="checkbox" class="added-check" value="' + b.id + '" onchange="toggleRemoveBtn()" style="width:18px;height:18px;flex-shrink:0;">';
+    cardsHtml += '<div style="flex:1;min-width:0;">';
+    cardsHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+    cardsHtml += '<span class="type-badge ' + (b.bill_type === 'income' ? 'type-income' : 'type-expense') + '" style="font-size:10px;padding:1px 6px;">' + typeLabel + '</span>';
+    cardsHtml += '<span style="font-weight:600;font-size:14px;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</span>';
+    cardsHtml += '</div>';
+    cardsHtml += '<div style="font-size:12px;color:#888;margin-top:4px;">' + escapeHtml(b.category_name || '') + (b.comment ? ' · ' + escapeHtml(b.comment) : '') + '</div>';
+    cardsHtml += '<div style="font-size:11px;color:#aaa;margin-top:2px;">👤 ' + escapeHtml(userMap[b.user_code] || b.user_code || '') + ' 🕐 ' + escapeHtml(b.transaction_time || '') + '</div>';
+    cardsHtml += '</div></label>';
+  });
+  document.getElementById('addedBillsCards').innerHTML = cardsHtml;
+  document.getElementById('removeSelectedBtn').style.display = 'none';
 }
 
 // ---- 查询条件初始化 ----
@@ -306,6 +362,7 @@ async function initFilters() {
 async function loadAvailableBills() {
   const tbody = document.getElementById('availableBillsBody');
   tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">加载中...</td></tr>';
+  document.getElementById('availableBillsCards').innerHTML = '';
   try {
     const params = new URLSearchParams();
     params.set('limit', '200');
@@ -320,6 +377,8 @@ async function loadAvailableBills() {
     if (acct) params.set('account_id', acct);
     var user = document.getElementById('editSourceUser').value;
     if (user) params.set('source_user', user);
+    var adj = document.getElementById('editAdjust').value;
+    if (adj) params.set('is_adjustment', adj);
     const from = document.getElementById('editTimeFrom').value;
     const to = document.getElementById('editTimeTo').value;
     if (from) params.set('transaction_time_from', from + ' 00:00:00');
@@ -329,6 +388,7 @@ async function loadAvailableBills() {
     const result = await resp.json();
     if (!result.success) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#c62828;">❌ ' + escapeHtml(result.message) + '</td></tr>';
+      document.getElementById('availableBillsCards').innerHTML = '';
       return;
     }
     const allBills = result.data || [];
@@ -345,6 +405,7 @@ async function loadAvailableBills() {
 
     if (filtered.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">所有符合条件的账单已加入</td></tr>';
+      document.getElementById('availableBillsCards').innerHTML = '';
       return;
     }
     let html = '';
@@ -362,9 +423,27 @@ async function loadAvailableBills() {
       html += '</tr>';
     });
     tbody.innerHTML = html;
+    document.getElementById('availableBillsCards').innerHTML = '';
+    let cardsHtml = '';
+    filtered.forEach(b => {
+      const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
+      const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
+      cardsHtml += '<label class="bill-card-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #f0f0f0;border-radius:8px;margin-bottom:6px;background:#fff;">';
+      cardsHtml += '<input type="checkbox" class="bill-check" value="' + b.id + '" style="width:18px;height:18px;flex-shrink:0;">';
+      cardsHtml += '<div style="flex:1;min-width:0;">';
+      cardsHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      cardsHtml += '<span class="type-badge ' + (b.bill_type === 'income' ? 'type-income' : 'type-expense') + '" style="font-size:10px;padding:1px 6px;">' + typeLabel + '</span>';
+      cardsHtml += '<span style="font-weight:600;font-size:14px;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</span>';
+      cardsHtml += '</div>';
+      cardsHtml += '<div style="font-size:12px;color:#888;margin-top:4px;">' + escapeHtml(b.category_name || '') + (b.comment ? ' · ' + escapeHtml(b.comment) : '') + '</div>';
+      cardsHtml += '<div style="font-size:11px;color:#aaa;margin-top:2px;">👤 ' + escapeHtml(userMap[b.user_code] || b.user_code || '') + ' 🕐 ' + escapeHtml(b.transaction_time || '') + '</div>';
+      cardsHtml += '</div></label>';
+    });
+    document.getElementById('availableBillsCards').innerHTML = cardsHtml;
     document.getElementById('selectAllBills').checked = false;
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#c62828;">❌ ' + escapeHtml(e.message) + '</td></tr>';
+    document.getElementById('availableBillsCards').innerHTML = '';
   }
 }
 
@@ -400,6 +479,49 @@ async function addSelectedBills() {
 }
 
 // ---- 删除明细 ----
+/* ── 折叠查询条件 ── */
+function toggleEditFilter() {
+  var body = document.getElementById('editFilterBody');
+  var arrow = document.getElementById('editFilterArrow');
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'flex';
+  arrow.style.transform = open ? '' : 'rotate(180deg)';
+}
+
+/* ── 批量移出 ── */
+function toggleAllAdded() {
+  var checked = document.getElementById('selectAllAdded').checked;
+  document.querySelectorAll('.added-check').forEach(function(cb) { cb.checked = checked; });
+  toggleRemoveBtn();
+}
+
+function toggleRemoveBtn() {
+  document.getElementById('removeSelectedBtn').style.display =
+    document.querySelectorAll('.added-check:checked').length > 0 ? '' : 'none';
+}
+
+async function removeSelectedAdded() {
+  var checked = document.querySelectorAll('.added-check:checked');
+  if (checked.length === 0) return;
+  var txIds = Array.from(checked).map(function(cb) { return parseInt(cb.value); });
+  try {
+    var resp = await fetch('/api/reconciliation/remove-transactions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reconciliation_no: RECON_NO, tx_ids: txIds}),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast('✅ 已移出 ' + txIds.length + ' 条', 'success');
+      loadDetail();
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('❌ 操作失败: ' + e.message, 'error');
+  }
+}
+
 async function removeBill(billId) {
   if (!confirm('确定删除此明细？')) return;
   try {

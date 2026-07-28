@@ -103,11 +103,13 @@ def api_category_icons():
 @bp.route('/api/categories/list')
 @login_required
 def api_categories_list():
-    """获取科目列表"""
+    """获取科目列表。
+    查询参数：hidden - 1=包含隐藏，0=不包含（默认）
+    """
     try:
-        from books.client import BookkeepingClient
-        bk = BookkeepingClient()
-        all_cats = bk.get_categories(category_type=None)
+        show_hidden = request.args.get('hidden', '0') == '1'
+        from db import query_categories
+        all_cats = query_categories(cat_type=None, show_hidden=show_hidden)
         def _sort_key(c):
             return c.get('displayOrder', 0) or 0
         for cat in all_cats:

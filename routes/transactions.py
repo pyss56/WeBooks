@@ -24,6 +24,7 @@ def api_transactions_list():
         transaction_time_to = request.args.get('transaction_time_to') or request.args.get('bill_time_to') or None
         reconciliation_no = request.args.get('reconciliation_no') or None
         exclude_transfer = request.args.get('exclude_transfer') == '1'
+        is_adjustment = request.args.get('is_adjustment') or None
 
         txs = get_transactions(
             limit=limit, offset=offset,
@@ -33,13 +34,15 @@ def api_transactions_list():
             transaction_time_from=transaction_time_from, transaction_time_to=transaction_time_to,
             reconciliation_no=reconciliation_no,
             exclude_transfer=exclude_transfer,
+            is_adjustment=is_adjustment,
         )
         total = count_transactions(
             bill_type=bill_type, created_by=created_by,
             account_filter=account_filter,
             reconciliation_flag=reconciliation_flag,
             transaction_time_from=transaction_time_from, transaction_time_to=transaction_time_to,
-            reconciliation_no=reconciliation_no
+            reconciliation_no=reconciliation_no,
+            is_adjustment=is_adjustment,
         )
         total_income = 0
         total_expense = 0
@@ -68,6 +71,9 @@ def api_transactions_list():
             if reconciliation_no:
                 sql += ' AND reconciliation_no=?'
                 params.append(reconciliation_no)
+            if is_adjustment:
+                sql += ' AND is_adjustment=?'
+                params.append(is_adjustment)
             cur = conn.execute(sql, params)
             r = cur.fetchone()
             if r:
@@ -535,28 +541,24 @@ def add_transaction_page():
     # 获取当前用户的默认账户和模板
     default_account_id = ''
     default_tx_type = 'expense'
+    default_category_id = ''
+    default_income_category_id = ''
+    default_income_account_id = ''
+    default_transfer_to_account_id = ''
     if user_code:
-        from db import get_user_account, get_connection
-        default_account_id = get_user_account(user_code, direction='expense') or ''
-        if not default_account_id:
-            default_account_id = get_user_account(user_code, direction='income') or ''
-        # 读取默认交易类型
-        conn = get_connection()
-        try:
-            row = conn.execute(
-                "SELECT default_tx_type, account_id, income_account_id FROM user_default_account WHERE user_code=?",
-                (user_code,)
-            ).fetchone()
-            if row:
-                default_tx_type = row['default_tx_type'] or 'expense'
-                if default_tx_type == 'expense':
-                    aid = row['account_id'] or ''
-                    if aid: default_account_id = aid
-                elif default_tx_type == 'income':
-                    aid = row['income_account_id'] or row['account_id'] or ''
-                    if aid: default_account_id = aid
-        finally:
-            conn.close()
+        from db import get_user_default_settings
+        defs = get_user_default_settings(user_code)
+        default_tx_type = defs.get('default_tx_type', 'expense')
+        default_category_id = defs.get('category_id', '')
+        default_income_category_id = defs.get('income_category_id', '')
+        default_income_account_id = defs.get('income_account_id', '')
+        default_transfer_to_account_id = defs.get('transfer_to_account_id', '')
+        if default_tx_type == 'expense':
+            default_account_id = defs.get('account_id', '') or defs.get('income_account_id', '') or ''
+        elif default_tx_type == 'income':
+            default_account_id = defs.get('income_account_id', '') or defs.get('account_id', '') or ''
+        else:
+            default_account_id = defs.get('account_id', '') or ''
 
     # 获取启用用户列表
     users = [u for u in get_users(status=1) if not u.get('deleted_at')]
@@ -575,6 +577,10 @@ def add_transaction_page():
         session_username=username,
         default_account_id=default_account_id,
         default_tx_type=default_tx_type,
+        default_category_id=default_category_id,
+        default_income_category_id=default_income_category_id,
+        default_income_account_id=default_income_account_id,
+        default_transfer_to_account_id=default_transfer_to_account_id,
     )
 
 

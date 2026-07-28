@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}默认交易{% endblock %}
+
+{% block content %}
+<h2>⚙️ 默认交易</h2>
+<p class="subtitle">设置记账时的默认交易类型、科目和账户</p>
+
+<div class="toast" id="toast"></div>
+
+<div class="card" style="max-width:520px;">
+  <div class="card-header" style="padding-bottom:0;border-bottom:none;">
+    <!-- 类型切换 -->
+    <div style="display:flex;gap:0;margin-bottom:20px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+      <button type="button" class="type-btn" data-tab="expense" onclick="switchTab('expense')"
+        style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#e4393c;color:#fff;">
+        💸 支出
+      </button>
+      <button type="button" class="type-btn" data-tab="income" onclick="switchTab('income')"
+        style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#f5f5f5;color:#888;">
+        💰 收入
+      </button>
+      <button type="button" class="type-btn" data-tab="transfer" onclick="switchTab('transfer')"
+        style="flex:1;padding:10px;border:none;cursor:pointer;font-size:15px;font-weight:600;transition:all 0.2s;background:#f5f5f5;color:#888;">
+        🔄 转账
+      </button>
+    </div>
+  </div>
+  <div class="card-body">
+    <!-- 支出 -->
+    <div id="tab-expense" class="settings-tab-content" style="display:block;">
+      <div class="field">
+        <label>默认支出科目</label>
+        <select id="expenseCategory">
+          <option value="">无默认科目</option>
+          {% for cat in expense_categories %}
+          <option value="{{ cat.id }}"{% if defaults and cat.id|string == defaults.get('category_id','')|string %} selected{% endif %}>{{ cat.name }}{% if cat.parent_name %}（{{ cat.parent_name }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>默认支出账户</label>
+        <select id="expenseAccount">
+          <option value="">无默认账户</option>
+          {% for acct in accounts %}
+          <option value="{{ acct.id }}"{% if defaults and acct.id|string == defaults.get('account_id','')|string %} selected{% endif %}>{{ acct.name }}{% if acct.parent_name %}（{{ acct.parent_name }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- 收入 -->
+    <div id="tab-income" class="settings-tab-content" style="display:none;">
+      <div class="field">
+        <label>默认收入科目</label>
+        <select id="incomeCategory">
+          <option value="">无默认科目</option>
+          {% for cat in income_categories %}
+          <option value="{{ cat.id }}"{% if defaults and cat.id|string == defaults.get('income_category_id','')|string %} selected{% endif %}>{{ cat.name }}{% if cat.parent_name %}（{{ cat.parent_name }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>默认收入账户</label>
+        <select id="incomeAccount">
+          <option value="">无默认账户</option>
+          {% for acct in accounts %}
+          <option value="{{ acct.id }}"{% if defaults and acct.id|string == defaults.get('income_account_id','')|string %} selected{% endif %}>{{ acct.name }}{% if acct.parent_name %}（{{ acct.parent_name }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- 转账 -->
+    <div id="tab-transfer" class="settings-tab-content" style="display:none;">
+      <div class="field">
+        <label>默认转出账户</label>
+        <select id="transferAccount">
+          <option value="">无默认账户</option>
+          {% for acct in accounts %}
+          <option value="{{ acct.id }}"{% if defaults and acct.id|string == defaults.get('account_id','')|string %} selected{% endif %}>{{ acct.name }}{% if acct.parent_name %}（{{ acct.parent_name }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>默认转入账户</label>
+        <select id="transferToAccount">
+          <option value="">无默认账户</option>
+          {% for acct in accounts %}
+          <option value="{{ acct.id }}"{% if defaults and acct.id|string == defaults.get('transfer_to_account_id','')|string %} selected{% endif %}>{{ acct.name }}{% if acct.parent_name %}（{{ acct.parent_name }}）{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button class="btn" onclick="saveSettings()" id="saveBtn" style="flex:1;">💾 保存</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_style %}
+<style>
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+.card-header { padding: 24px 24px 16px; }
+.card-body { padding: 0 24px 24px; }
+.field { margin-bottom: 16px; }
+.field label {
+  display: block;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 4px;
+}
+.field input, .field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+.field input:focus, .field select:focus {
+  border-color: #07c160 !important;
+  box-shadow: 0 0 0 2px rgba(7,193,96,0.1);
+}
+.btn {
+  display: inline-block;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-decoration: none;
+  color: #fff;
+  background: #07c160;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+.btn:hover { background: #06ad56; }
+.btn:disabled { background: #94dbb0; cursor: not-allowed; }
+.type-btn { outline: none; }
+.type-btn:hover { filter: brightness(0.95); }
+</style>
+{% endblock %}
+
+{% block extra_script %}
+var _activeTab = 'expense';
+
+function switchTab(tab) {
+  _activeTab = tab;
+  var btns = document.querySelectorAll('.type-btn');
+  btns.forEach(function(b) {
+    var isActive = b.dataset.tab === tab;
+    var bg = '#f5f5f5', fg = '#888';
+    if (isActive) {
+      bg = tab === 'expense' ? '#e4393c' : tab === 'income' ? '#2e7d32' : '#1565c0';
+      fg = '#fff';
+    }
+    b.style.background = bg;
+    b.style.color = fg;
+  });
+  document.querySelectorAll('.settings-tab-content').forEach(function(c) {
+    c.style.display = c.id === 'tab-' + tab ? 'block' : 'none';
+  });
+}
+
+// 初始化默认 tab
+(function() {
+  var def = '{{ defaults.get("default_tx_type", "expense") }}';
+  switchTab(def);
+})();
+
+async function saveSettings() {
+  var btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 保存中...';
+  try {
+    var defaultTxType = _activeTab || 'expense';
+
+    var payload = {
+      default_tx_type: defaultTxType,
+      category_id: document.getElementById('expenseCategory').value,
+      account_id: document.getElementById('expenseAccount').value,
+      income_category_id: document.getElementById('incomeCategory').value,
+      income_account_id: document.getElementById('incomeAccount').value,
+    };
+    if (defaultTxType === 'transfer') {
+      payload.account_id = document.getElementById('transferAccount').value;
+      payload.transfer_to_account_id = document.getElementById('transferToAccount').value;
+    } else if (defaultTxType === 'income') {
+      payload.account_id = document.getElementById('incomeAccount').value;
+    }
+
+    var resp = await fetch('/api/user/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast('✅ ' + result.message, 'success');
+    } else {
+      showToast('❌ ' + result.message, 'error');
+    }
+  } catch (e) {
+    showToast('❌ 保存失败: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 保存';
+  }
+}
+{% endblock %}

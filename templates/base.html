@@ -293,6 +293,14 @@
         .modal .field input:focus, .modal .field select:focus, .modal .field textarea:focus { border-color: #07c160; }
         .modal .field textarea { resize: vertical; min-height: 60px; }
         .modal .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+        .modal-close {
+            position: absolute; top: 12px; right: 16px;
+            background: none; border: none; font-size: 22px; color: #999;
+            cursor: pointer; line-height: 1; padding: 4px 8px; border-radius: 4px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .modal-close:hover { background: #f5f5f5; color: #333; }
+        .modal { position: relative; }
         /* ── 通用图标/颜色选择器 ── */
         .icon-grid {
             display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-top: 4px;
@@ -579,6 +587,23 @@
     </div>
 
     <script>
+        function closeModal(el) {
+            var overlay = el.closest('.modal-overlay');
+            if (overlay) overlay.classList.remove('active');
+        }
+        // 自动给所有弹窗添加关闭按钮
+        (function() {
+            document.addEventListener('DOMContentLoaded', function() {
+                document.querySelectorAll('.modal-overlay > .modal').forEach(function(m) {
+                    if (m.querySelector('.modal-close')) return;
+                    var btn = document.createElement('button');
+                    btn.className = 'modal-close';
+                    btn.innerHTML = '&times;';
+                    btn.onclick = function() { closeModal(this); };
+                    m.insertBefore(btn, m.firstChild);
+                });
+            });
+        })();
         function showToast(msg, type) {
             const t = document.getElementById('toast');
             t.textContent = msg;
@@ -699,6 +724,8 @@
         }
 
         /* ── 左滑卡片通用初始化 ── */
+        var _SWIPE_TRANSITION = 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)';
+
         function initSwipeCards(containerEl) {
             if (!containerEl) return;
             var wraps = containerEl.querySelectorAll('.card-swipe-wrap');
@@ -713,10 +740,15 @@
                 }
 
                 function closeSwipe(animate) {
-                    if (animate !== false) inner.style.transition = 'transform 0.25s ease';
+                    if (animate !== false) inner.style.transition = _SWIPE_TRANSITION;
                     else inner.style.transition = 'none';
                     inner.style.transform = '';
                     wrap.classList.remove('swiped');
+                }
+
+                function getCurrentTranslate() {
+                    var m = inner.style.transform.match(/translateX\(([-\d.]+)px\)/);
+                    return m ? parseFloat(m[1]) : 0;
                 }
 
                 wrap.addEventListener('touchstart', function(e) {
@@ -731,23 +763,35 @@
                 wrap.addEventListener('touchmove', function(e) {
                     if (!isDragging) return;
                     currentX = e.touches[0].clientX;
-                    var offset = currentX - startX;
-                    var cur = parseFloat(inner.style.transform.replace('translateX(','').replace('px)','')) || 0;
+                    var rawOffset = currentX - startX;
+                    var cur = getCurrentTranslate();
+
                     if (cur < 0) {
-                        // already open — allow follow finger right
-                        inner.style.transform = 'translateX(' + Math.min(offset + cur, 0) + 'px)';
-                    } else if (offset < -5) {
-                        // start opening
-                        inner.style.transform = 'translateX(' + Math.max(offset, -actionsWidth) + 'px)';
+                        // already open — allow dragging closed
+                        var pull = rawOffset + cur;
+                        // 如果已关闭超过边界，加阻尼
+                        if (pull > 0) pull = pull * 0.35;
+                        inner.style.transform = 'translateX(' + Math.min(pull, 0) + 'px)';
+                    } else if (rawOffset < 0) {
+                        // start opening — 带阻尼：前 30px 1:1，之后 0.4x
+                        var absOff = Math.abs(rawOffset);
+                        var damped;
+                        if (absOff <= 30) {
+                            damped = rawOffset;
+                        } else {
+                            damped = -30 + (rawOffset + 30) * 0.4;
+                        }
+                        inner.style.transform = 'translateX(' + Math.max(damped, -actionsWidth) + 'px)';
                     }
                 }, {passive: true});
 
                 wrap.addEventListener('touchend', function() {
                     if (!isDragging) return;
                     isDragging = false;
-                    var offset = currentX - startX;
-                    inner.style.transition = 'transform 0.25s ease';
-                    if (offset < -40) {
+                    var cur = getCurrentTranslate();
+                    inner.style.transition = _SWIPE_TRANSITION;
+                    // 如果露出的操作区超过30%，则吸边展开
+                    if (cur < -(actionsWidth * 0.3)) {
                         inner.style.transform = 'translateX(-' + actionsWidth + 'px)';
                         wrap.classList.add('swiped');
                     } else {
@@ -762,7 +806,7 @@
                 var swiped = document.querySelector('.card-swipe-wrap.swiped');
                 if (swiped && !swiped.contains(e.target)) {
                     var inner = swiped.querySelector('.card-swipe-inner');
-                    if (inner) { inner.style.transition = 'transform 0.25s ease'; inner.style.transform = ''; }
+                    if (inner) { inner.style.transition = _SWIPE_TRANSITION; inner.style.transform = ''; }
                     swiped.classList.remove('swiped');
                 }
             }, {passive: true});

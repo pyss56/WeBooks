@@ -1,4 +1,4 @@
-手机{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}页面记账{% endblock %}
 
 {% block content %}
@@ -43,24 +43,55 @@ var ocrData = null;
 var _unmatchedHints = [];
 var DEFAULT_TX_TYPE = '{{ default_tx_type }}';
 var DEFAULT_ACCOUNT_ID = '{{ default_account_id }}';
+var DEFAULT_CATEGORY_ID = '{{ default_category_id }}';
+var DEFAULT_INCOME_CATEGORY_ID = '{{ default_income_category_id }}';
+var DEFAULT_INCOME_ACCOUNT_ID = '{{ default_income_account_id }}';
+var DEFAULT_TRANSFER_TO_ACCOUNT_ID = '{{ default_transfer_to_account_id }}';
+
+// 选择默认科目的辅助函数
+function selectDefaultCategory(type) {
+  var catId = '';
+  var acctId = '';
+  if (type === 'expense') {
+    catId = DEFAULT_CATEGORY_ID;
+    acctId = DEFAULT_ACCOUNT_ID;
+  } else if (type === 'income') {
+    catId = DEFAULT_INCOME_CATEGORY_ID;
+    acctId = DEFAULT_INCOME_ACCOUNT_ID || DEFAULT_ACCOUNT_ID;
+  }
+  if (catId) {
+    var catSel = document.getElementById('categorySelect');
+    for (var i = 0; i < catSel.options.length; i++) {
+      if (catSel.options[i].value === catId) {
+        catSel.selectedIndex = i;
+        break;
+      }
+    }
+  }
+  if (acctId) {
+    var acctSel = document.getElementById('accountSelect');
+    for (var i = 0; i < acctSel.options.length; i++) {
+      if (acctSel.options[i].value === acctId) {
+        acctSel.selectedIndex = i;
+        break;
+      }
+    }
+  }
+}
 
 // 页面加载时应用默认模板（延迟到 switchType 就绪后）
 (function() {
   var checkReady = setInterval(function() {
     if (typeof switchType === 'function') {
       clearInterval(checkReady);
-      if (DEFAULT_TX_TYPE === 'income' || DEFAULT_TX_TYPE === 'transfer') {
-        switchType(DEFAULT_TX_TYPE);
+      if (DEFAULT_TX_TYPE === 'income') {
+        switchType('income');
+      } else if (DEFAULT_TX_TYPE === 'transfer') {
+        switchType('transfer');
+      } else {
+        switchType('expense');
       }
-      if (DEFAULT_ACCOUNT_ID) {
-        var acctSel = document.getElementById('accountSelect');
-        for (var i = 0; i < acctSel.options.length; i++) {
-          if (acctSel.options[i].value === DEFAULT_ACCOUNT_ID) {
-            acctSel.selectedIndex = i;
-            break;
-          }
-        }
-      }
+      selectDefaultCategory(DEFAULT_TX_TYPE === 'income' ? 'income' : 'expense');
     }
   }, 50);
 })();
@@ -340,13 +371,14 @@ function clearOcrHint() {
   </div>
 </div>
 
-<!-- 成功卡片 -->
-<div class="card" id="resultBox" style="display:none;max-width:520px;margin-top:16px;">
-  <div class="msg-box">
-    <span class="big-icon">✅</span>
-    <p id="resultTitle" style="font-size:18px;font-weight:600;color:#07c160;">交易已创建</p>
-    <p id="resultDetail" class="sub" style="margin-top:4px;"></p>
-    <div style="margin-top:16px;display:flex;gap:8px;justify-content:center;">
+<!-- 成功弹窗 -->
+<div class="modal-overlay" id="resultModal">
+  <div class="modal" style="text-align:center;">
+    <span style="font-size:48px;display:block;margin-bottom:12px;">✅</span>
+    <h3 id="resultTitle" style="color:#07c160;margin-bottom:8px;">交易已创建</h3>
+    <p id="resultDetail" style="font-size:14px;color:#666;margin-bottom:20px;"></p>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button class="btn btn-primary" onclick="closeResultModal()">继续</button>
       <a href="/transaction" class="btn btn-outline">查看交易</a>
     </div>
   </div>
@@ -502,6 +534,16 @@ function switchType(type) {
     toAcctField.style.display = 'block';
     // 转账科目固定为"转账"
     catField.innerHTML = '<option value="" selected>转账</option>';
+    // 预选默认转入账户
+    if (DEFAULT_TRANSFER_TO_ACCOUNT_ID) {
+      var toSel = document.getElementById('toAccountSelect');
+      for (var i = 0; i < toSel.options.length; i++) {
+        if (toSel.options[i].value === DEFAULT_TRANSFER_TO_ACCOUNT_ID) {
+          toSel.selectedIndex = i;
+          break;
+        }
+      }
+    }
   } else {
     catField.style.display = '';
     toAcctField.style.display = 'none';
@@ -513,6 +555,8 @@ function switchType(type) {
       opt.textContent = cat.name + (cat.parent_name ? '（' + cat.parent_name + '）' : '');
       catField.appendChild(opt);
     });
+    // 切换到类型后自动选择默认科目和账户
+    selectDefaultCategory(type);
   }
   clearError();
 }
@@ -530,10 +574,21 @@ function showError(msg) {
 
 function resetForm() {
   ocrData = null;
-  $('resultBox').style.display = 'none';
   $('submitBtn').style.display = '';
   $('amountInput').value = '';
   $('commentInput').value = '';
+  // 清空 OCR/短信识别内容
+  document.getElementById('noticeInput').value = '';
+  document.getElementById('noticeResult').innerHTML = '';
+  document.getElementById('noticeResult').style.display = 'none';
+  document.getElementById('noticeError').style.display = 'none';
+  document.getElementById('noticeLoading').style.display = 'none';
+  document.getElementById('ocrResult').innerHTML = '';
+  document.getElementById('ocrResult').style.display = 'none';
+  document.getElementById('ocrError').style.display = 'none';
+  document.getElementById('ocrLoading').style.display = 'none';
+  document.getElementById('ocrUploadZone').style.display = 'block';
+  document.getElementById('ocrFileInput').value = '';
   // 应用默认模板
   loadDefaultTemplate();
   var now = new Date();
@@ -542,6 +597,11 @@ function resetForm() {
     now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + 'T' +
     pad(now.getHours()) + ':' + pad(now.getMinutes());
   clearError();
+}
+
+function closeResultModal() {
+  document.getElementById('resultModal').classList.remove('active');
+  resetForm();
 }
 
 function loadDefaultTemplate() {
@@ -561,9 +621,18 @@ function loadDefaultTemplate() {
       }
     }
   }
-  // 清空转入账户
+  // 清空并设置默认转入账户
   if (document.getElementById('toAccountSelect')) {
-    document.getElementById('toAccountSelect').value = '';
+    var toSel = document.getElementById('toAccountSelect');
+    toSel.value = '';
+    if (DEFAULT_TRANSFER_TO_ACCOUNT_ID) {
+      for (var i = 0; i < toSel.options.length; i++) {
+        if (toSel.options[i].value === DEFAULT_TRANSFER_TO_ACCOUNT_ID) {
+          toSel.selectedIndex = i;
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -663,9 +732,7 @@ async function submitTransaction() {
       var detail = '金额：¥' + parseFloat(amount).toFixed(2);
       $('resultTitle').textContent = title;
       $('resultDetail').textContent = detail;
-      $('resultBox').style.display = '';
-      $('submitBtn').style.display = 'none';
-      showToast('✅ 交易已创建', 'success');
+      $('resultModal').classList.add('active');
     } else {
       showError(result.message || '创建交易失败');
     }

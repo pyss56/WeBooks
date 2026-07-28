@@ -187,7 +187,8 @@ class BookkeepingClient:
                            transaction_time=None, transaction_type=3,
                            created_by=None, user_code=None,
                            source=None, source_user=None,
-                           raw_message=None, message_log_id=None):
+                           raw_message=None, message_log_id=None,
+                           is_adjustment=0):
         from db import add_transaction, get_connection
         from datetime import datetime
         if transaction_time is None:
@@ -243,7 +244,8 @@ class BookkeepingClient:
                                 created_by=effective_created_by, user_code=user_code,
                                 source=source, source_user=source_user,
                                 raw_message=raw_message, message_log_id=message_log_id,
-                                currency=acct_currency)
+                                currency=acct_currency,
+                                is_adjustment=is_adjustment)
         if tx_id > 0: return {'success': True, 'result': {'id': str(tx_id), 'uuid': tx_uuid, 'verify_code': verify_code}}
         return {'success': False, 'errorMessage': '写入交易失败'}
 

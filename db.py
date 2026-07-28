@@ -13,15 +13,97 @@ DB_PATH = os.path.join(DB_DIR, 'data.db')
 
 # ============ 数据库版本管理 ============
 
+CURRENT_SCHEMA_VERSION = 1
+
+
+def _init_schema_version(conn):
+    """创建 schema_version 表（幂等）"""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            description TEXT DEFAULT NULL
+        )
+    """)
+
+
+def _get_schema_version(conn) -> int:
+    """获取当前数据库版本，无记录返回 0"""
+    try:
+        row = conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
+        return row['v'] if row and row['v'] else 0
+    except Exception:
+        return 0
+
+
+def _apply_migration(conn, version: int, description: str, sqls: list):
+    """应用一个迁移版本"""
+    for sql in sqls:
+        conn.execute(sql)
+    conn.execute(
+        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+        (version, description)
+    )
+    conn.commit()
+    logger.info(f"数据库迁移 v{version}: {description}")
+
+
+def _supplementary_migration(conn, table_desc, col_name, alter_sql):
+    """补充迁移：尝试给表加列，列已存在则静默忽略"""
+    try:
+        conn.execute(alter_sql)
+        conn.commit()
+        logger.info(f"补充迁移: {table_desc} 增加 {col_name} 列")
+    except Exception:
+        pass
+
+
+def _run_migrations(conn):
+    """按版本号执行增量迁移"""
+    _init_schema_version(conn)
+    current = _get_schema_version(conn)
+
+    if current < 1:
+        _apply_migration(conn, 1, '建表 + transaction 表增加 is_adjustment 列', [
+            "CREATE TABLE IF NOT EXISTS user_default_transaction ("
+            "    id                  INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    user_code           TEXT NOT NULL UNIQUE,"
+            "    account_id          TEXT NOT NULL,"
+            "    income_account_id   TEXT DEFAULT NULL,"
+            "    transfer_to_account_id TEXT DEFAULT NULL,"
+            "    default_tx_type     TEXT DEFAULT 'expense',"
+            "    category_id         TEXT DEFAULT NULL,"
+            "    income_category_id  TEXT DEFAULT NULL,"
+            "    message_log_id      INTEGER DEFAULT NULL,"
+            "    source              TEXT DEFAULT NULL,"
+            "    source_user         TEXT DEFAULT NULL,"
+            "    created_by          TEXT DEFAULT NULL,"
+            "    created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),"
+            "    updated_by          TEXT DEFAULT NULL,"
+            "    updated_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))"
+            ")",
+            "ALTER TABLE \"transaction\" ADD COLUMN is_adjustment INTEGER DEFAULT 0",
+        ])
+
+    # ── 补充迁移：对旧数据库自动补列（幂等，已存在则忽略） ──
+    _supplementary_migration(conn, 'user_default_transaction', 'transfer_to_account_id',
+                             "ALTER TABLE user_default_transaction ADD COLUMN transfer_to_account_id TEXT DEFAULT NULL")
+    _supplementary_migration(conn, '"transaction"', 'is_adjustment',
+                             "ALTER TABLE \"transaction\" ADD COLUMN is_adjustment INTEGER DEFAULT 0")
+
+
 def _create_all_tables(conn):
     """创建所有表（最终形态），包含所有历史迁移逻辑（幂等安全）"""
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_default_account (
+        CREATE TABLE IF NOT EXISTS user_default_transaction (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             user_code           TEXT NOT NULL UNIQUE,
             account_id          TEXT NOT NULL,
             income_account_id   TEXT DEFAULT NULL,
+            transfer_to_account_id TEXT DEFAULT NULL,
             default_tx_type     TEXT DEFAULT 'expense',
+            category_id         TEXT DEFAULT NULL,
+            income_category_id  TEXT DEFAULT NULL,
             message_log_id      INTEGER DEFAULT NULL,
             source              TEXT DEFAULT NULL,
             source_user         TEXT DEFAULT NULL,
@@ -168,7 +250,8 @@ def _create_all_tables(conn):
             verify_code         TEXT DEFAULT NULL,
             created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             updated_by          TEXT DEFAULT NULL,
-            updated_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            is_adjustment       INTEGER DEFAULT 0
         )
     """)
     conn.execute("""
@@ -491,11 +574,14 @@ def get_dict_group(group_code: str) -> dict:
 
 
 def init_db():
-    """初始化数据库表结构（建表 + 默认数据）"""
+    """初始化数据库表结构（建表 + 迁移 + 默认数据）"""
     conn = get_connection()
     try:
         _create_all_tables(conn)
         conn.commit()
+
+        # 执行增量迁移（按版本号）
+        _run_migrations(conn)
 
         # 初始化默认角色和菜单
         init_default_roles()
@@ -519,7 +605,7 @@ def get_user_account(user_code: str, direction: str = 'expense') -> Optional[str
     try:
         col = 'income_account_id' if direction == 'income' else 'account_id'
         cursor = conn.execute(
-            f"SELECT {col}, account_id FROM user_default_account WHERE user_code = ?",
+            f"SELECT {col}, account_id FROM user_default_transaction WHERE user_code = ?",
             (user_code,)
         )
         row = cursor.fetchone()
@@ -532,6 +618,80 @@ def get_user_account(user_code: str, direction: str = 'expense') -> Optional[str
     except Exception as e:
         logger.error(f"查询用户账户失败: {e}")
         return None
+    finally:
+        conn.close()
+
+
+def get_user_default_settings(user_code: str) -> dict:
+    """获取用户的所有默认交易（账户+科目+交易类型）"""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("""
+            SELECT default_tx_type, account_id, income_account_id,
+                   category_id, income_category_id, transfer_to_account_id
+            FROM user_default_transaction WHERE user_code = ?
+        """, (user_code,))
+        row = cursor.fetchone()
+        if not row:
+            return {
+                'default_tx_type': 'expense',
+                'account_id': '',
+                'income_account_id': '',
+                'category_id': '',
+                'income_category_id': '',
+                'transfer_to_account_id': '',
+            }
+        return {
+            'default_tx_type': row['default_tx_type'] or 'expense',
+            'account_id': row['account_id'] or '',
+            'income_account_id': row['income_account_id'] or '',
+            'category_id': row['category_id'] or '',
+            'income_category_id': row['income_category_id'] or '',
+            'transfer_to_account_id': row['transfer_to_account_id'] or '',
+        }
+    except Exception as e:
+        logger.error(f"查询用户默认交易失败: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
+def save_user_default_settings(user_code: str, settings: dict,
+                                updated_by: str = None) -> bool:
+    """保存用户的所有默认交易
+    :param settings: {account_id, income_account_id, default_tx_type, category_id, income_category_id, transfer_to_account_id}
+    """
+    conn = get_connection()
+    try:
+        account_id = settings.get('account_id', '') or ''
+        income_account_id = settings.get('income_account_id', '') or None
+        default_tx_type = settings.get('default_tx_type', 'expense') or 'expense'
+        category_id = settings.get('category_id', '') or None
+        income_category_id = settings.get('income_category_id', '') or None
+        transfer_to_account_id = settings.get('transfer_to_account_id', '') or None
+        conn.execute("""
+            INSERT INTO user_default_transaction
+                (user_code, account_id, income_account_id, default_tx_type,
+                 category_id, income_category_id, transfer_to_account_id,
+                 updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(user_code) DO UPDATE SET
+                account_id = excluded.account_id,
+                income_account_id = excluded.income_account_id,
+                default_tx_type = excluded.default_tx_type,
+                category_id = excluded.category_id,
+                income_category_id = excluded.income_category_id,
+                transfer_to_account_id = excluded.transfer_to_account_id,
+                updated_by = excluded.updated_by,
+                updated_at = datetime('now', 'localtime')
+        """, (user_code, account_id, income_account_id, default_tx_type,
+              category_id, income_category_id, transfer_to_account_id, updated_by))
+        conn.commit()
+        logger.info(f"用户 {user_code} 默认交易已保存")
+        return True
+    except Exception as e:
+        logger.error(f"保存用户默认交易失败: {e}")
+        return False
     finally:
         conn.close()
 
@@ -691,7 +851,7 @@ def set_user_account(user_code: str, account_id: str, direction: str = 'expense'
     try:
         if direction == 'both':
             conn.execute("""
-                INSERT INTO user_default_account (user_code, account_id, income_account_id, message_log_id, source, source_user, updated_by, updated_at)
+                INSERT INTO user_default_transaction (user_code, account_id, income_account_id, message_log_id, source, source_user, updated_by, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                 ON CONFLICT(user_code) DO UPDATE SET
                     account_id = excluded.account_id,
@@ -701,7 +861,7 @@ def set_user_account(user_code: str, account_id: str, direction: str = 'expense'
             """, (user_code, account_id, account_id, message_log_id, source, source_user, updated_by))
         elif direction == 'income':
             conn.execute("""
-                INSERT INTO user_default_account (user_code, account_id, income_account_id, message_log_id, source, source_user, updated_by, updated_at)
+                INSERT INTO user_default_transaction (user_code, account_id, income_account_id, message_log_id, source, source_user, updated_by, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                 ON CONFLICT(user_code) DO UPDATE SET
                     income_account_id = excluded.income_account_id,
@@ -710,7 +870,7 @@ def set_user_account(user_code: str, account_id: str, direction: str = 'expense'
             """, (user_code, account_id, account_id, message_log_id, source, source_user, updated_by))
         else:
             conn.execute("""
-                INSERT INTO user_default_account (user_code, account_id, income_account_id, message_log_id, source, source_user, updated_by, updated_at)
+                INSERT INTO user_default_transaction (user_code, account_id, income_account_id, message_log_id, source, source_user, updated_by, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                 ON CONFLICT(user_code) DO UPDATE SET
                     account_id = excluded.account_id,
@@ -1036,7 +1196,8 @@ def add_transaction(bill_type: str, category_name: str, amount: float,
                     message_log_id: int = None,
                     currency: str = 'CNY',
                     category_id: str = None,
-                    verify_code: str = None) -> tuple:
+                    verify_code: str = None,
+                    is_adjustment: int = 0) -> tuple:
     """添加交易记录（amount 为元，自动转为分存储）"""
     from datetime import datetime
     if not transaction_time:
@@ -1049,9 +1210,9 @@ def add_transaction(bill_type: str, category_name: str, amount: float,
     conn = get_connection()
     try:
         cursor = conn.execute("""
-            INSERT INTO "transaction" (bill_type, category_name, category_id, amount, comment, created_by, transaction_time, account_id, account_name, to_account_id, to_account_name, user_code, source, source_user, currency, raw_message, message_log_id, uuid, verify_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (bill_type, category_name, category_id, amount_cents, comment, created_by, transaction_time, account_id, account_name, to_account_id, to_account_name, user_code, source, source_user, currency, raw_message, message_log_id, tx_uuid, verify_code))
+            INSERT INTO "transaction" (bill_type, category_name, category_id, amount, comment, created_by, transaction_time, account_id, account_name, to_account_id, to_account_name, user_code, source, source_user, currency, raw_message, message_log_id, uuid, verify_code, is_adjustment)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (bill_type, category_name, category_id, amount_cents, comment, created_by, transaction_time, account_id, account_name, to_account_id, to_account_name, user_code, source, source_user, currency, raw_message, message_log_id, tx_uuid, verify_code, is_adjustment))
         conn.commit()
         return cursor.lastrowid, tx_uuid, verify_code
     except Exception as e:
@@ -1239,7 +1400,8 @@ def get_transactions(limit: int = 500, offset: int = 0,
                      transaction_time_from: str = None, transaction_time_to: str = None,
                      reconciliation_no: str = None,
                      include_deleted: bool = False,
-                     exclude_transfer: bool = False) -> list:
+                     exclude_transfer: bool = False,
+                     is_adjustment: str = None) -> list:
     """查询交易列表"""
     conn = get_connection()
     try:
@@ -1273,6 +1435,9 @@ def get_transactions(limit: int = 500, offset: int = 0,
         if reconciliation_no:
             sql += " AND reconciliation_no = ?"
             params.append(reconciliation_no)
+        if is_adjustment is not None:
+            sql += " AND is_adjustment = ?"
+            params.append(is_adjustment)
         sql += " ORDER BY transaction_time DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         cursor = conn.execute(sql, params)
@@ -1289,7 +1454,8 @@ def count_transactions(bill_type: str = None, created_by: str = None,
                        reconciliation_flag: str = None,
                        transaction_time_from: str = None, transaction_time_to: str = None,
                        reconciliation_no: str = None,
-                       include_deleted: bool = False) -> int:
+                       include_deleted: bool = False,
+                       is_adjustment: str = None) -> int:
     """统计交易数量"""
     conn = get_connection()
     try:
@@ -1318,6 +1484,9 @@ def count_transactions(bill_type: str = None, created_by: str = None,
         if reconciliation_no:
             sql += " AND reconciliation_no = ?"
             params.append(reconciliation_no)
+        if is_adjustment is not None:
+            sql += " AND is_adjustment = ?"
+            params.append(is_adjustment)
         cursor = conn.execute(sql, params)
         row = cursor.fetchone()
         return row['cnt'] if row else 0
@@ -1658,7 +1827,15 @@ def add_category(name, cat_type='expense', parent_id='0', icon='1', color='ff6b2
 
 
 def get_categories(cat_type=None):
-    """获取科目列表（树形）"""
+    """（兼容旧接口）获取科目列表（树形）"""
+    return query_categories(cat_type=cat_type, show_hidden=True)
+
+
+def query_categories(cat_type=None, show_hidden: bool = False):
+    """统一科目查询，支持多维度过滤。
+    :param cat_type: None=全部, 'expense'=支出, 'income'=收入
+    :param show_hidden: 是否包含已隐藏的科目，默认 False
+    """
     conn = get_connection()
     try:
         sql = "SELECT * FROM categories WHERE 1=1"
@@ -1666,6 +1843,8 @@ def get_categories(cat_type=None):
         if cat_type is not None:
             sql += " AND type=?"
             params.append(cat_type)
+        if not show_hidden:
+            sql += " AND hidden=0"
         sql += " ORDER BY parent_id, display_order"
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         # 统一转为驼峰命名
@@ -1802,10 +1981,36 @@ def add_account(name, category=5, icon='1', color='ff6b22',
 
 
 def get_accounts():
-    """获取账户列表（树形）"""
+    """获取账户列表（树形），余额从交易表中实时计算"""
     conn = get_connection()
     try:
         rows = [dict(r) for r in conn.execute("SELECT * FROM accounts ORDER BY parent_id, id").fetchall()]
+        # 从交易表计算各账户余额（分）
+        # 注意：amount 是分，expense 为负，income 为正，transfer 为正但钱从 account_id 转出
+        bal_sql = """
+            SELECT account_id,
+              SUM(CASE WHEN bill_type = 'transfer' THEN -amount ELSE amount END) as bal
+            FROM "transaction"
+            WHERE deleted_at IS NULL AND account_id IS NOT NULL
+            GROUP BY account_id
+        """
+        bal_map = {}
+        for r in conn.execute(bal_sql).fetchall():
+            bal_map[str(r['account_id'])] = r['bal'] or 0
+        # 转账交易对 to_account_id 是转入，金额为正
+        to_bal_sql = """
+            SELECT to_account_id, SUM(amount) as bal FROM "transaction"
+            WHERE deleted_at IS NULL AND to_account_id IS NOT NULL AND bill_type = 'transfer'
+            GROUP BY to_account_id
+        """
+        for r in conn.execute(to_bal_sql).fetchall():
+            aid = str(r['to_account_id'])
+            bal_map[aid] = bal_map.get(aid, 0) + (r['bal'] or 0)
+
+        for r in rows:
+            aid = str(r['id'])
+            r['balance'] = bal_map.get(aid, 0)
+
         m = {}
         for r in rows:
             r['subAccounts'] = []
@@ -1851,45 +2056,80 @@ def get_excluded_account_ids(user_code: str) -> set:
     return excluded
 
 
-def get_user_accessible_accounts(user_code: str = None) -> list:
-    """获取指定项目用户可用的账户列表（树形），排除其他用户私有的账户"""
+def query_accounts(user_code: str = None, show_hidden: bool = False, flat: bool = False) -> list:
+    """统一账户查询，支持多维度过滤。
+    :param user_code: 用户编码，按可见性过滤（排除其他用户私有的账户）
+    :param show_hidden: 是否包含隐藏账户，默认 False
+    :param flat: 是否展平为叶子节点列表，默认 False（返回树形）
+    """
     accounts = get_accounts()
-    if not user_code:
-        return accounts
-    excluded = get_excluded_account_ids(user_code)
-    result = []
-    for acc in accounts:
-        acc_id = str(acc.get('id', ''))
-        if acc_id in excluded:
-            continue
-        sub = acc.get('subAccounts', [])
-        sub_ids = [str(s.get('id', '')) for s in sub]
-        if sub and all(sid in excluded for sid in sub_ids):
-            continue
-        if sub:
-            allowed_subs = [s for s in sub if str(s.get('id', '')) not in excluded]
-            if allowed_subs:
-                acc = dict(acc)
-                acc['subAccounts'] = allowed_subs
+    if not user_code and not show_hidden:
+        accounts = _filter_hidden_accounts(accounts)
+    elif user_code:
+        excluded = get_excluded_account_ids(user_code) if user_code else set()
+        result = []
+        for acc in accounts:
+            acc_id = str(acc.get('id', ''))
+            if acc_id in excluded:
+                continue
+            if not show_hidden and acc.get('hidden'):
+                continue
+            sub = acc.get('subAccounts', [])
+            sub_ids = [str(s.get('id', '')) for s in sub]
+            if sub and all(sid in excluded for sid in sub_ids):
+                continue
+            if sub:
+                allowed = []
+                for s in sub:
+                    if str(s.get('id', '')) in excluded:
+                        continue
+                    if not show_hidden and s.get('hidden'):
+                        continue
+                    allowed.append(s)
+                if allowed:
+                    acc = dict(acc)
+                    acc['subAccounts'] = allowed
+                    result.append(acc)
+            else:
                 result.append(acc)
-        else:
-            result.append(acc)
+        accounts = result
+
+    if flat:
+        flat_list = []
+        for acc in accounts:
+            subs = acc.get('subAccounts', [])
+            if subs:
+                for s in subs:
+                    s['_display_name'] = f"{s.get('name', '')} ({acc.get('name', '')})"
+                    flat_list.append(s)
+            else:
+                flat_list.append(acc)
+        return flat_list
+    return accounts
+
+
+def get_user_accessible_accounts(user_code: str = None) -> list:
+    """（兼容旧接口）获取指定用户可用的账户列表（树形）"""
+    return query_accounts(user_code=user_code, show_hidden=False, flat=False)
+
+
+def _filter_hidden_accounts(accounts: list) -> list:
+    """递归过滤隐藏账户"""
+    result = []
+    for a in accounts:
+        if a.get('hidden'):
+            continue
+        subs = a.get('subAccounts', [])
+        if subs:
+            a = dict(a)
+            a['subAccounts'] = [s for s in subs if not s.get('hidden')]
+        result.append(a)
     return result
 
 
 def get_flat_accounts(user_code: str = None) -> list:
-    """获取指定用户可用的扁平账户列表（叶子节点），有子账户的父级不参与选择"""
-    tree = get_user_accessible_accounts(user_code)
-    flat = []
-    for acc in tree:
-        sub = acc.get('subAccounts', [])
-        if sub:
-            for s in sub:
-                s['_display_name'] = f"{s.get('name', '')} ({acc.get('name', '')})"
-                flat.append(s)
-        else:
-            flat.append(acc)
-    return flat
+    """（兼容旧接口）获取指定用户可用的扁平账户列表（叶子节点）"""
+    return query_accounts(user_code=user_code, show_hidden=False, flat=True)
 
 
 def modify_account(account_id, updated_by=None, **kwargs):
@@ -2438,6 +2678,7 @@ DEFAULT_MENUS = [
     (25, 'page', 22, '💳', '账户设置', '/accounts', 3),
     (26, 'page', 22, '🔍', '解析配置', '/ts/rules', 4),
     (27, 'page', 22, '🏷️', '别名管理', '/aliases', 5),
+    (40, 'page', 22, '⚙️', '默认交易', '/user/settings', 6),
     # 按键权限（别名管理）
     (28, 'btn', 27, '✏️', '别名-编辑', '/api/aliases/modify', 99),
     (29, 'btn', 27, '🗑️', '别名-删除', '/api/aliases/delete', 99),
@@ -2479,7 +2720,7 @@ def init_menus(force: bool = False):
             conn.execute(
                 "INSERT OR IGNORE INTO role_menu (role_code, menu_id, created_by) VALUES ('admin', ?, 'system')",
                 (mid,))
-        user_page_labels = ['首页', '交易查询', '页面记账']
+        user_page_labels = ['首页', '交易查询', '页面记账', '默认交易']
         for row in conn.execute("SELECT id, label FROM menu WHERE type='page'").fetchall():
             if row['label'] in user_page_labels:
                 conn.execute(
@@ -2889,7 +3130,7 @@ def get_transactions_statistics(start_time, end_time, user_filter=None):
         if user_filter:
             user_code_filter = user_filter
 
-        sql = "SELECT category_id, category_name, SUM(CASE WHEN bill_type='income' THEN amount ELSE 0 END) as income_amount, ABS(SUM(CASE WHEN bill_type='expense' THEN amount ELSE 0 END)) as expense_amount FROM \"transaction\" WHERE transaction_time>=? AND transaction_time<=? AND deleted_at IS NULL AND bill_type != 'transfer'"
+        sql = "SELECT category_id, category_name, SUM(CASE WHEN bill_type='income' THEN amount ELSE 0 END) as income_amount, ABS(SUM(CASE WHEN bill_type='expense' THEN amount ELSE 0 END)) as expense_amount FROM \"transaction\" WHERE transaction_time>=? AND transaction_time<=? AND deleted_at IS NULL AND bill_type != 'transfer' AND is_adjustment != 1"
         if user_code_filter:
             sql += " AND user_code=?"
             params.append(user_code_filter)
@@ -2911,7 +3152,7 @@ def get_transaction_amounts(start_time, end_time):
     """获取金额汇总"""
     conn = get_connection()
     try:
-        cur = conn.execute("SELECT COALESCE(SUM(CASE WHEN bill_type='income' THEN amount ELSE 0 END),0) as ti, COALESCE(ABS(SUM(CASE WHEN bill_type='expense' THEN amount ELSE 0 END)),0) as te FROM \"transaction\" WHERE transaction_time>=? AND transaction_time<=? AND deleted_at IS NULL AND bill_type != 'transfer'", (start_time, end_time))
+        cur = conn.execute("SELECT COALESCE(SUM(CASE WHEN bill_type='income' THEN amount ELSE 0 END),0) as ti, COALESCE(ABS(SUM(CASE WHEN bill_type='expense' THEN amount ELSE 0 END)),0) as te FROM \"transaction\" WHERE transaction_time>=? AND transaction_time<=? AND deleted_at IS NULL AND bill_type != 'transfer' AND is_adjustment != 1", (start_time, end_time))
         r = cur.fetchone()
         if r:
             return {'summary': {'amounts': [{'incomeAmount': int(r['ti']), 'expenseAmount': int(r['te'])}]}}

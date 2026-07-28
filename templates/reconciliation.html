@@ -39,8 +39,10 @@
   </div>
 </div>
 
-<!-- 移动端浮动创建按钮 -->
-<button class="btn btn-primary mobile-create-fab" id="mobileCreateBtn" onclick="showCreateDialog()">➕</button>
+<!-- 移动端浮动按钮 -->
+<button class="mobile-fab mobile-fab-refresh" id="mobileRefreshBtn" onclick="loadList()">🔄</button>
+<button class="mobile-fab mobile-fab-search" id="mobileSearchBtn" onclick="toggleSearchSheet()">🔍</button>
+<button class="mobile-fab mobile-fab-create" id="mobileCreateBtn" onclick="showCreateDialog()">➕</button>
 
 <!-- 列表区域 -->
 <div class="recon-table-wrap" style="background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
@@ -126,6 +128,14 @@
         </select>
       </div>
       <div>
+        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">余额调整</label>
+        <select id="dialogAdjust" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;">
+          <option value="">全部</option>
+          <option value="0" selected>仅普通交易</option>
+          <option value="1">仅调整记录</option>
+        </select>
+      </div>
+      <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">记账人</label>
         <select id="dialogSourceUser" style="padding:7px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;min-width:120px;">
           <option value="">全部</option>
@@ -171,10 +181,11 @@
 
     <!-- 已加入的账单 -->
     <h4 style="font-size:14px;color:#333;margin-bottom:8px;">已加入的账单</h4>
-    <div style="max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
+    <div class="dialog-bills-table" style="max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:16px;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr style="background:#f5f5f5;position:sticky;top:0;">
+            <th style="padding:8px 10px;width:36px;"><input type="checkbox" id="selectAllAdded" onchange="toggleAllAdded()"></th>
             <th style="padding:8px 10px;text-align:left;">类型</th>
             <th style="padding:8px 10px;text-align:left;">科目</th>
             <th style="padding:8px 10px;text-align:right;">金额</th>
@@ -184,13 +195,17 @@
           </tr>
         </thead>
         <tbody id="addedBillsBody">
-          <tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>
         </tbody>
       </table>
     </div>
 
+    <!-- 手机端已加入账单卡片 -->
+    <div id="addedBillsCards" class="dialog-bills-cards" style="display:none;"></div>
+
     <!-- 底部按钮 -->
     <div style="display:flex;justify-content:flex-end;gap:12px;border-top:1px solid #eee;padding-top:16px;">
+      <button class="btn btn-outline" id="deleteSelectedBtn" onclick="removeSelectedAdded()" style="display:none;">🗑️ 移出选中</button>
       <button class="btn btn-outline" onclick="closeCreateDialog()">关闭</button>
     </div>
   </div>
@@ -208,6 +223,37 @@
     <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:16px;">
       <button class="btn btn-outline" onclick="closeChartDialog()">关闭</button>
     </div>
+  </div>
+</div>
+
+<!-- 移动端底部搜索面板 -->
+<div class="search-sheet" id="searchSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">🔍 查询条件</div>
+  <div class="field">
+    <label>对账号</label>
+    <input type="text" id="sheetQueryNo" placeholder="输入对账号">
+  </div>
+  <div class="field">
+    <label>记账时间从</label>
+    <input type="date" id="sheetDateFrom">
+  </div>
+  <div class="field">
+    <label>至</label>
+    <input type="date" id="sheetDateTo">
+  </div>
+  <div class="field">
+    <label>状态</label>
+    <select id="sheetStatus">
+      <option value="">全部</option>
+      <option value="草稿">草稿</option>
+      <option value="确认">已确认</option>
+      <option value="取消">已取消</option>
+    </select>
+  </div>
+  <div class="sheet-actions">
+    <button class="btn btn-outline" onclick="resetSheetSearch()">🔄 重置</button>
+    <button class="btn btn-primary" onclick="submitSheetSearch()">🔍 查询</button>
   </div>
 </div>
 
@@ -305,27 +351,57 @@
   }
 
   @media (max-width: 768px) {
-    .filter-toggle-bar { display: block; margin-bottom: 12px; }
+    .filter-toggle-bar { display: none !important; }
     #filterArea { display: none; }
     #filterArea.show { display: block; }
-    .mobile-create-fab { display: flex !important; }
+    .mobile-fab { display: flex !important; }
+    .search-sheet { display: block; }
   }
   @media (min-width: 769px) {
     .filter-toggle-bar { display: none !important; }
-    .mobile-create-fab { display: none !important; }
+    .mobile-fab { display: none !important; }
     .btn-mobile-create { display: inline-block !important; }
+    .search-sheet { display: none; }
   }
   @media (max-width: 768px) {
     .btn-mobile-create { display: none !important; }
-  }
-  /* 移动端浮动创建按钮 */
-  .mobile-create-fab {
+  }  /* 移动端浮动按钮 */
+  .mobile-fab {
     display: none;
-    position: fixed; bottom: 70px; right: 16px; z-index: 900;
+    position: fixed; right: 16px; z-index: 900;
     width: 56px; height: 56px; border-radius: 50%;
     font-size: 24px; align-items: center; justify-content: center;
     box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-    padding: 0;
+    padding: 0; border: none; cursor: pointer;
+  }
+  .mobile-fab-create { bottom: 70px; background: rgba(7,193,96,0.5); color: #fff; }
+  .mobile-fab-search { bottom: 136px; background: rgba(26,115,232,0.5); color: #fff; }
+  .mobile-fab-refresh { bottom: 202px; background: rgba(26,115,232,0.5); color: #fff; }
+  /* 移动端底部搜索面板 */
+  .search-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 950;
+    background: #fff; border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+    padding: 20px; padding-bottom: calc(180px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .search-sheet.open { transform: translateY(0); }
+  .search-sheet .sheet-handle { width: 36px; height: 4px; background: #ddd; border-radius: 2px; margin: 0 auto 16px; }
+  .search-sheet .sheet-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; text-align: center; }
+  .search-sheet .field { margin-bottom: 14px; }
+  .search-sheet .field label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+  .search-sheet .field input, .search-sheet .field select { width: 100%; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 8px; font-size: 14px; outline: none; }
+  .search-sheet .sheet-actions { display: flex; gap: 10px; margin-top: 8px; }
+  .search-sheet .sheet-actions .btn { flex: 1; padding: 12px; border-radius: 8px; font-size: 15px; }
+  /* 手机端账单卡片 */
+  @media (max-width: 768px) {
+    .dialog-bills-table { display: none; }
+    .dialog-bills-cards { display: block !important; }
+  }
+  @media (min-width: 769px) {
+    .dialog-bills-cards { display: none !important; }
   }
 
   /* ── 分页手机适配 ── */
@@ -343,6 +419,28 @@ let addedBills = [];
 var userMap = {};
 var reconCurrentPage = 1;
 var reconTotalPages = 1;
+
+/* ── 移动端搜索面板 ── */
+function toggleSearchSheet() {
+  document.getElementById('searchSheet').classList.toggle('open');
+}
+function closeSearchSheet() {
+  document.getElementById('searchSheet').classList.remove('open');
+}
+function submitSheetSearch() {
+  document.getElementById('queryNo').value = document.getElementById('sheetQueryNo').value.trim();
+  document.getElementById('queryDateFrom').value = document.getElementById('sheetDateFrom').value;
+  document.getElementById('queryDateTo').value = document.getElementById('sheetDateTo').value;
+  document.getElementById('queryStatus').value = document.getElementById('sheetStatus').value;
+  closeSearchSheet();
+  loadList();
+}
+function resetSheetSearch() {
+  document.getElementById('sheetQueryNo').value = '';
+  document.getElementById('sheetDateFrom').value = '';
+  document.getElementById('sheetDateTo').value = '';
+  document.getElementById('sheetStatus').value = '';
+}
 
 function fmtMoney(v) {
   return Number(v / 100 || 0).toLocaleString('zh-CN', {minimumFractionDigits:2,maximumFractionDigits:2});
@@ -494,8 +592,10 @@ async function showCreateDialog() {
   currentReconciliationNo = '';
   addedBills = [];
   document.getElementById('createDialog').style.display = 'block';
-  document.getElementById('addedBillsBody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+  document.getElementById('addedBillsBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
   document.getElementById('dialogBillsBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">请输入查询条件后查询</td></tr>';
+  document.getElementById('addedBillsCards').innerHTML = '';
+  document.getElementById('deleteSelectedBtn').style.display = 'none';
 
   // 加载账户、科目、用户列表
   try {
@@ -614,6 +714,8 @@ async function loadDialogBills() {
     if (acct) params.set('account_id', acct);
     var user = document.getElementById('dialogSourceUser').value;
     if (user) params.set('source_user', user);
+    var adj = document.getElementById('dialogAdjust').value;
+    if (adj) params.set('is_adjustment', adj);
     const from = document.getElementById('dialogTimeFrom').value;
     const to = document.getElementById('dialogTimeTo').value;
     if (from) params.set('transaction_time_from', from + ' 00:00:00');
@@ -706,26 +808,31 @@ async function addSelectedBills() {
 async function loadAddedBills() {
   const tbody = document.getElementById('addedBillsBody');
   if (!currentReconciliationNo) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+    document.getElementById('addedBillsCards').innerHTML = '';
     return;
   }
   try {
     const resp = await fetch('/api/reconciliation/detail?reconciliation_no=' + encodeURIComponent(currentReconciliationNo));
     const result = await resp.json();
     if (!result.success) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+      document.getElementById('addedBillsCards').innerHTML = '';
       return;
     }
     const bills = result.transactions || [];
     if (bills.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+      document.getElementById('addedBillsCards').innerHTML = '';
       return;
     }
     let html = '';
+    let cardsHtml = '';
     bills.forEach(b => {
       const typeLabel = b.bill_type === 'income' ? '收入' : '支出';
       const amtClass = b.bill_type === 'income' ? 'amt-income' : 'amt-expense';
       html += '<tr>';
+      html += '<td style="padding:6px 10px;text-align:center;"><input type="checkbox" class="added-check" value="' + b.id + '" onchange="toggleDeleteBtn()"></td>';
       html += '<td style="padding:6px 10px;">' + typeLabel + '</td>';
       html += '<td style="padding:6px 10px;">' + escapeHtml(b.category_name || '') + '</td>';
       html += '<td style="padding:6px 10px;text-align:right;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</td>';
@@ -733,11 +840,53 @@ async function loadAddedBills() {
       html += '<td style="padding:6px 10px;">' + escapeHtml(userMap[b.user_code] || b.user_code || '') + '</td>';
       html += '<td style="padding:6px 10px;text-align:center;font-size:11px;color:#888;">' + escapeHtml(b.transaction_time || '') + '</td>';
       html += '</tr>';
+      // 手机端卡片
+      cardsHtml += '<label class="bill-card-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #f0f0f0;border-radius:8px;margin-bottom:6px;background:#fff;">';
+      cardsHtml += '<input type="checkbox" class="added-check" value="' + b.id + '" onchange="toggleDeleteBtn()" style="width:18px;height:18px;flex-shrink:0;">';
+      cardsHtml += '<div style="flex:1;min-width:0;">';
+      cardsHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      cardsHtml += '<span class="type-badge ' + (b.bill_type === 'income' ? 'type-income' : 'type-expense') + '" style="font-size:10px;padding:1px 6px;">' + typeLabel + '</span>';
+      cardsHtml += '<span style="font-weight:600;font-size:14px;" class="' + amtClass + '">¥' + fmtMoney(b.amount) + '</span>';
+      cardsHtml += '</div>';
+      cardsHtml += '<div style="font-size:12px;color:#888;margin-top:4px;">' + escapeHtml(b.category_name || '') + (b.comment ? ' · ' + escapeHtml(b.comment) : '') + '</div>';
+      cardsHtml += '<div style="font-size:11px;color:#aaa;margin-top:2px;">👤 ' + escapeHtml(userMap[b.user_code] || b.user_code || '') + ' 🕐 ' + escapeHtml(b.transaction_time || '') + '</div>';
+      cardsHtml += '</div></label>';
     });
     tbody.innerHTML = html;
+    document.getElementById('addedBillsCards').innerHTML = cardsHtml;
+    document.getElementById('deleteSelectedBtn').style.display = 'none';
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#999;">暂无已加入的账单</td></tr>';
+    document.getElementById('addedBillsCards').innerHTML = '';
   }
+}
+
+/* ── 已加入账单批量移出 ── */
+function toggleAllAdded() {
+  var checked = document.getElementById('selectAllAdded').checked;
+  document.querySelectorAll('.added-check').forEach(function(cb) { cb.checked = checked; });
+  toggleDeleteBtn();
+}
+function toggleDeleteBtn() {
+  document.getElementById('deleteSelectedBtn').style.display =
+    document.querySelectorAll('.added-check:checked').length > 0 ? '' : 'none';
+}
+async function removeSelectedAdded() {
+  var checked = document.querySelectorAll('.added-check:checked');
+  if (checked.length === 0) return;
+  var txIds = Array.from(checked).map(function(cb) { return parseInt(cb.value); });
+  try {
+    var resp = await fetch('/api/reconciliation/remove-transactions', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reconciliation_no: currentReconciliationNo, tx_ids: txIds}),
+    });
+    var result = await resp.json();
+    if (result.success) {
+      showToast('✅ 已移出 ' + txIds.length + ' 条', 'success');
+      loadDialogBills();
+      loadAddedBills();
+    } else { showToast('❌ ' + result.message, 'error'); }
+  } catch (e) { showToast('❌ 操作失败: ' + e.message, 'error'); }
 }
 
 function closeChartDialog() {

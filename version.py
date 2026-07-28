@@ -5,7 +5,7 @@ import os
 
 __version__ = "1.3.0-beta"
 __app_name__ = "WeBooks"
-__description__ = "企业微信记账助手"
+__description__ = "微记账"
 
 # Docker 构建信息（如果存在）
 _build_info_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'build_info')

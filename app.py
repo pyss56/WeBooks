@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""WeBooks - 企业微信记账助手
+"""WeBooks - 微记账
 通过企业微信自建应用接收消息，调用记账API记账，并推送消费汇总
 """
 import json
@@ -23,6 +23,7 @@ from auth import login_required, init_auth_routes
 # 新增公开路由时在此添加前缀，会同时应用于 _no_prefix 检查
 PUBLIC_PATH_PREFIXES = [
     '/',  # 首页（@login_required 处理登录跳转）
+    '/login', '/logout',
     '/qywx/', '/s/t/', '/s/go/', '/s/cb/',
     '/tx/', '/ts_img/',
     '/api/transactions/by-uuid/',
@@ -115,8 +116,12 @@ if _entry_code:
                 if any(self._path_matches_prefix(path, p) for p in self._no_prefix):
                     return self.wsgi_app(environ, start_response)
 
-            # 无前缀 + 未登录 + 非公开路径 → 跳转外部地址
-            start_response('302 Found', [('Location', config.WEB_ENTRY_REDIRECT)])
+            # 无前缀 + 未登录 + 非公开路径 → 跳转带前缀的登录页
+            qs = environ.get('QUERY_STRING', '')
+            login_url = f"{_entry_prefix}/login?next={path}"
+            if qs:
+                login_url += '%3F' + qs
+            start_response('302 Found', [('Location', login_url)])
             return []
 
         def _call_with_rewrite(self, environ, start_response):
@@ -267,6 +272,7 @@ from routes.menus import bp as bp_menus
 from routes.roles import bp as bp_roles
 from routes.ts_rules import bp as bp_ts_rules
 from routes.ocr import bp as bp_ocr
+from routes.user_settings import bp as bp_user_settings
 
 app.register_blueprint(bp_transactions)
 app.register_blueprint(bp_accounts)
@@ -281,6 +287,7 @@ app.register_blueprint(bp_menus)
 app.register_blueprint(bp_roles)
 app.register_blueprint(bp_ts_rules)
 app.register_blueprint(bp_ocr)
+app.register_blueprint(bp_user_settings)
 
 # 注入 scheduler 依赖到 scheduler blueprint
 _TASK_FUNCS = {
