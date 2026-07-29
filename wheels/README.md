@@ -1,11 +1,16 @@
-# 离线 Wheel 包目录
+# 离线 Wheel 包缓存目录
 
-将预下载的 `.whl` 文件放入此目录，可实现无网络环境部署。
+此目录用于缓存 OCR 依赖（如 ddddocr）的 wheel 包。
 
-## 下载离线包
+## 工作原理
+
+- **首次启动**：`check_deps.py` 自动从网络下载 .whl 文件到此目录并安装
+- **Docker 场景**：建议在 `docker-compose.yml` 中挂载此目录，避免每次重建重复下载
+- **本地开发**：下载后容器/本地都可复用，无需重复下载
+
+## 手动预下载（可选）
 
 ```bash
-# 下载 ddddocr（轻量版 OCR，推荐）
 python download_wheels.py ddddocr
 
 # 下载 PaddleOCR（重量版）

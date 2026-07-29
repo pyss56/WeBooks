@@ -29,7 +29,7 @@ tests/
 _*.py
 debug_*.py
 
-# Wheel 离线包（下载后保留，用于无网络部署）
-# wheels/*.whl
+# Wheel 离线包（每个用户在自己机器上首次运行自动下载）
+wheels/*.whl
 test_*.py
 data/

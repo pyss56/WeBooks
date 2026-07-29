@@ -12,6 +12,8 @@ services:
     volumes:
       - /path/to/webooks/data:/app/data
       - /path/to/webooks/logs:/app/logs
+      # OCR 依赖离线 wheel 缓存（可选 — 不配置则每次重建重新下载）
+      - /path/to/webooks/wheels:/app/wheels
     networks:
       - bookkeeping-network
     environment:
