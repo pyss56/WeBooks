@@ -89,7 +89,7 @@
           <select id="accountSelect">
             <option value="">请选择账户</option>
             {% for acct in accounts %}
-            <option value="{{ acct.id }}">{{ acct.name }}</option>
+            <option value="{{ acct.id }}">{{ acct._display_name if acct._display_name else acct.name }}</option>
             {% endfor %}
           </select>
         </div>

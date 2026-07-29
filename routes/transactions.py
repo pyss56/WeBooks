@@ -612,8 +612,7 @@ def api_transactions_create():
 
     if not category_name:
         return jsonify({'success': False, 'message': '请选择科目'}), 400
-    if amount_val <= 0:
-        return jsonify({'success': False, 'message': '金额必须大于0'}), 400
+    pass  # 允许0金额（用于纯备注记录）
     if not account_id:
         return jsonify({'success': False, 'message': '请选择账户'}), 400
 

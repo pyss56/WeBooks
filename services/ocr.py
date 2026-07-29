@@ -284,6 +284,7 @@ def _ocr_ddddocr(image_path: str, detector) -> list:
     for row in rows:
         row.sort(key=lambda c: c['x'])
         line_text = ''.join(c['text'] for c in row)
+        line_text = line_text.replace('；', '').replace(';', '')
         y_avg = sum(c['y'] for c in row) // len(row)
         results.append({'text': line_text, 'y': y_avg})
 
@@ -323,7 +324,7 @@ _LABEL_ALIASES = {
     '支付奖励': '支付奖励', '收单机松': '收单机构', '收单机构': '收单机构',
     '清机构': '清算机构', '清算机构': '清算机构',
     '收款方尘全称': '收款方全称', '收款方全称': '收款方全称',
-    '商户全称': '商户全称', '商家': '商户',
+    '商全称': '商户全称', '商户全称': '商户全称', '商家': '商户',
     '交易单号': '交易单号', '商户单号': '商户单号',
     '当前状态': '当前状态',
     # ── 银行截图 ──
@@ -333,6 +334,8 @@ _LABEL_ALIASES = {
     '交易账户': '交易账户', '交易币种': '交易币种',
     '对方账户': '对方账户',
     '账户余额': '账户余额', '可用余额': '可用余额',
+    '已用额度': '已用额度', '交易商户': '交易商户',
+    '网络平台名称': '网络平台名称',
 }
 
 
@@ -352,7 +355,8 @@ def _extract_label_value(lines: list) -> list:
 
     # 银行截图专用标签（值紧跟在标签后，无分隔符）
     _bank_labels = ['交易金额', '交易类型', '交易时间', '交易对象', '交易摘要',
-                    '交易币种', '账户余额', '可用余额', '对方账户']
+                    '交易币种', '账户余额', '可用余额', '已用额度', '对方账户',
+                    '交易商户', '网络平台名称']
 
     pairs = []
     for line in lines:
@@ -392,8 +396,33 @@ def _extract_amount_from_lines(lines: list) -> Optional[float]:
 
     def _clean_amount(text: str) -> Optional[float]:
         """从文本中清理并提取金额，返回 None 表示无法提取"""
-        # 替换 OCR 常见误识: y/Y→¥, 十→去掉
-        cleaned = text.replace('十', '').replace('y', '¥').replace('Y', '¥')
+        # 替换 OCR 常见误识: y/Y→¥, 十/；/;去掉
+        cleaned = text.replace('十', '').replace('；', '').replace(';', '').replace('y', '¥').replace('Y', '¥')
+        has_J = 'J' in cleaned.upper()
+
+        # 有 J/j：先去 J 再 ÷100（J 是小数点附近的分割噪声）
+        if has_J:
+            no_j = cleaned.replace('J', '').replace('j', '')
+            import re as _re
+            digits = _re.sub(r'[^\d]', '', no_j)
+            n = len(digits)
+            if n == 4:
+                try:
+                    v = float(digits)
+                    if 1000 <= v <= 9999:
+                        r = v / 100.0
+                        if 1.0 <= r < 9999:
+                            return r
+                except ValueError:
+                    pass
+            elif n == 5:
+                try:
+                    v = float(digits)
+                    r = v / 100.0
+                    if 1.0 <= r < 99999:
+                        return r
+                except ValueError:
+                    pass
 
         # 如果原文本有 C/c（千位逗号），按逗号位置拆分
         if 'C' in text or 'c' in text:
@@ -426,6 +455,11 @@ def _extract_amount_from_lines(lines: list) -> Optional[float]:
             try:
                 v = float(m.group(1))
                 if 1.0 <= v < 9999:
+                    # 有 ¥ 符号且无小数点 → 末尾2位当角分（¥500 → 5.00）
+                    if ('¥' in cleaned or '￥' in cleaned) and '.' not in text:
+                        r = v / 100.0
+                        if 1.0 <= r < 9999:
+                            return r
                     return v
             except ValueError:
                 pass
@@ -453,16 +487,37 @@ def _extract_amount_from_lines(lines: list) -> Optional[float]:
             pass
         return None
 
-    # ── 1. 含"金额"标签的行（最可靠） ──
+    # ── 1. 带 ¥/￥/一 前缀的行优先（更精准） ──
+    amount_yuan = None
+    for line in lines:
+        text = line['text']
+        if '¥' not in text and '￥' not in text and 'y' not in text and 'Y' not in text:
+            # 一开头后跟数字也可能是 ¥（如 一500 → ¥5.00）
+            if not re.match(r'一\d', text):
+                continue
+        text = text.replace('y', '¥').replace('Y', '¥').replace('十', '').replace('一', '¥', 1)
+        r = _clean_amount(text)
+        if r is not None:
+            amount_yuan = r
+            break
+
+    # ── 2. 含"金额"标签的行 ──
+    amount_label = None
     for line in lines:
         text = line['text'].strip()
         if '金额' not in text:
             continue
         r = _clean_amount(text)
         if r is not None:
-            return r
+            amount_label = r
+            break
 
-    # ── 2. 带 ¥/￥ 前缀（含 y 误识） — 仅处理包含金额符号的行 ──
+    if amount_yuan is not None:
+        return amount_yuan
+    if amount_label is not None:
+        return amount_label
+
+    # ── 3. 带负号（退款/扣款） ──
     for line in lines:
         text = line['text']
         if '¥' not in text and '￥' not in text and 'y' not in text and 'Y' not in text:
@@ -643,7 +698,7 @@ def parse_screenshot(texts: list) -> dict:
         bill_type = 'income'
 
     # 5. 收款方（用作科目/商户名）
-    merchant = fields.get('收款方全称') or fields.get('商户全称') or fields.get('交易对象') or ''
+    merchant = fields.get('收款方全称') or fields.get('商户全称') or fields.get('交易对象') or fields.get('交易商户') or ''
     # 回退：从未标记的文本中提取"付款给XXX"或"交易对象XXX"
     if not merchant:
         m = re.search(r'付款给(.{2,20}?)(?:\s|$|收款|支付|转账)', full_text)
@@ -656,6 +711,12 @@ def parse_screenshot(texts: list) -> dict:
 
     # 6. 付款方式（用作账户）
     account_name = fields.get('付款方式') or fields.get('交易账户') or ''
+    # OCR 字符纠错：眼→银
+    if account_name:
+        account_name = account_name.replace('眼', '银')
+        # 补全不闭合的括号：信用卡(55522 → 信用卡(55522)
+        if '(' in account_name and ')' not in account_name:
+            account_name += ')'
     # 回退：识别账户类型 + 尾号（尾号即使不准也对别名匹配有用）
     if not account_name:
         _acct_map = {
@@ -663,18 +724,24 @@ def parse_screenshot(texts: list) -> dict:
             '储蓄': '储蓄账户', '活期': '活期账户',
             '社保卡': '社保卡', '信用十': '信用卡', '信用': '信用卡',
             '借记卡': '借记卡', '借计卡': '借记卡', '工资卡': '工资卡',
+            '建设眼行': '建设银行', '眼行': '银行',
         }
         acct_type = ''
         for ocr_kw, std_name in _acct_map.items():
             if ocr_kw in full_text:
                 acct_type = std_name
                 break
-        # 提取尾号（不管 OCR 读得准不准）
-        m = re.search(r'尾号[为是](\d{3,6})', full_text)
-        if acct_type and m:
-            account_name = f"{acct_type}({m.group(1)})"
-        elif m:
-            account_name = f"银行账户({m.group(1)})"
+        # 提取尾号（银行卡尾号应为4位，超过则重新识别）
+        m = re.search(r'尾号[为是](\d{3,8})', full_text)
+        if m:
+            tail = m.group(1)
+            if len(tail) > 4:
+                # 只取最后4位（OCR 多读的字符在尾部）
+                tail = tail[-4:]
+            if acct_type:
+                account_name = f"{acct_type}({tail})"
+            else:
+                account_name = f"银行账户({tail})"
         elif acct_type:
             account_name = acct_type
 

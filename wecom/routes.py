@@ -136,8 +136,9 @@ def _handle_image_message(msg_data: dict, from_user: str, message_log_id: int = 
         type_label = '支出' if bill_type == 'expense' else '收入'
         lines = []
 
-        if amount:
-            lines.append(f'✅ 💵 金额：¥{amount:.2f}')
+        if amount is not None:
+            sign = '-' if amount < 0 else ''
+            lines.append(f'✅ 💵 金额：{sign}¥{abs(amount):.2f}')
         else:
             lines.append('❌ ❌ 💵 金额：未识别')
         if merchant:
@@ -153,31 +154,29 @@ def _handle_image_message(msg_data: dict, from_user: str, message_log_id: int = 
         else:
             lines.append('❌ ❌ 🕐 时间：未识别')
 
+        sign = '-' if amount is not None and amount < 0 else ''
         cmd = merchant or ('其他支出' if bill_type == 'expense' else '其他收入')
-        cmd += f' {amount:.2f}' if amount else ' 金额'
+        cmd += f' {sign}{abs(amount):.2f}' if amount is not None else ' 金额'
         if bill_type == 'income':
             cmd = f'收入 {cmd}'
         if account_name:
-            # 清理账户名：OCR 可能漏掉括号，将尾部数字还原为 (卡号)
             acct_clean = _clean_account_name(account_name)
             cmd += f' @{acct_clean}'
         lines += ['', f'📝 {cmd}', '', f'（商户→科目、账户→别名自动匹配）']
 
-        # 先发送识别结果消息
         wecom_client.send_text_message('\n'.join(lines), from_user)
 
-        if not amount:
+        if amount is None:
             return ''
 
         # ── 消息2：自动入账 ──
-        # 构造标准记账文本，走 handle_text_message 复用完整入账逻辑
         try:
+            sign = '-' if amount < 0 else ''
             cat_name = merchant or ('其他支出' if bill_type == 'expense' else '其他收入')
-            cmd_text = f"{cat_name} {amount:.2f}"
+            cmd_text = f"{cat_name} {sign}{abs(amount):.2f}"
             if bill_type == 'income':
                 cmd_text = f"收入 {cmd_text}"
             if account_name:
-                # 清理账户名：OCR 可能漏掉括号，将尾部数字还原为 (卡号)
                 acct_clean = _clean_account_name(account_name)
                 cmd_text += f' @{acct_clean}'
 

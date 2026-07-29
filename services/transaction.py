@@ -315,7 +315,7 @@ class TransactionService:
                 'category_id': category_id,
                 'amount': amount,
                 'transaction_type': transaction_type,
-                'message': f"✅ 记账成功！\n📂 科目ID:{category_id}: ¥{amount:.2f}\n"
+                'message': f"✅ 记账成功！\n📂 科目ID:{category_id}: {'-¥' if amount < 0 else '¥'}{abs(amount):.2f}\n"
                            f"💳 {account['name']}\n🕐 {time_str}\n"
                            f"{'📝 ' + comment if comment else ''}{link}",
             }
@@ -658,8 +658,8 @@ class TransactionService:
                 'transaction_type': transaction_type,
                 'resolved_category_name': resolved_category_name if resolved_category_name != category_name else None,
                 'resolved_id': resolved_category_id or category.get('id'),
-                'message': f"✅ 记账成功！\n"
-                           f"📂 {category['name']}: ¥{amount:.2f}\n"
+                'message': f"✅ 记账成功！\n💰 {type_label}\n"
+                           f"📂 {category['name']}: {'-¥' if amount < 0 else '¥'}{abs(amount):.2f}\n"
                            f"{acct_display}\n"
                            f"🕐 {time_str}\n"
                            f"{'📝 ' + comment if comment else ''}"
@@ -840,7 +840,8 @@ class TransactionService:
                 'success': True, 'id': result.get('result', {}).get('id', ''),
                 'uuid': tx_uuid, 'verify_code': vcode, 'resolved_category_name': resolved_name,
                 'resolved_id': category.get('id'),
-                'message': f"✅ 记账成功！\n📂 {category['name']}: ¥{amount:.2f}\n"
+                'message': f"✅ 记账成功！\n� {pending['type_label']}\n"
+                           f"�📂 {category['name']}: {'-¥' if amount < 0 else '¥'}{abs(amount):.2f}\n"
                            f"{icon} {account['name']}\n🕐 {time_str}\n"
                            f"{'📝 ' + comment if comment else ''}{link}",
             }
@@ -889,7 +890,8 @@ class TransactionService:
                 'success': True, 'id': result.get('result', {}).get('id', ''),
                 'uuid': tx_uuid, 'resolved_account_name': resolved_name,
                 'resolved_id': account.get('id'),
-                'message': f"✅ 记账成功！\n📂 {_cat_name}: ¥{amount:.2f}\n"
+                'message': f"✅ 记账成功！\n� {pending['type_label']}\n"
+                           f"�📂 {_cat_name}: {'-¥' if amount < 0 else '¥'}{abs(amount):.2f}\n"
                            f" {icon} {account['name']}\n🕐 {time_str}\n"
                            f"{'📝 ' + comment if comment else ''}{link}",
             }

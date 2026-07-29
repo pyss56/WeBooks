@@ -198,9 +198,9 @@ class BookkeepingClient:
         else:
             bt = transaction_time.strftime('%Y-%m-%d %H:%M:%S')
         bill_type = 'income' if transaction_type == 2 else 'expense'
-        # 负值表示退款，保持原值不变
+        # 负值表示退款，DB 存正数（余额增加），消息端显示负号
         if amount < 0:
-            bamt = amount
+            bamt = -amount
         else:
             bamt = amount if transaction_type == 2 else -amount
         # 校验 user_code

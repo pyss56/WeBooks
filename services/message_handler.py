@@ -665,7 +665,7 @@ class MessageHandler:
                 self._reply_mode[self._key(from_user)] = 'card'
                 self._reply_data[self._key(from_user)] = {
                     'card_title': '✅ 记账成功',
-                    'card_content': f'✅ 记账成功！\n📂 {resolved_category}: ¥{amount:.2f}\n💳 {selected_name}\n🕐 {time_str}{vcode_link}\n\n回复9可撤销',
+                    'card_content': f'✅ 记账成功！\n📂 {resolved_category}: {"-" if amount < 0 else ""}¥{abs(amount):.2f}\n💳 {selected_name}\n🕐 {time_str}{vcode_link}\n\n回复9可撤销',
                 }
             else:
                 parts.append(f'交易创建失败: {tx_result.get("errorMessage", "未知错误")}')
