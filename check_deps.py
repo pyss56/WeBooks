@@ -6,7 +6,6 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +63,6 @@ def _get_wheels_dir() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wheels')
 
 
-def _find_offline_wheel(package_spec: str) -> Optional[str]:
-    """在 wheels/ 目录查找匹配的 wheel 文件
-
-    支持模糊匹配：包名忽略版本号、Python 标签等差异
-    例如: ddddocr → ddddocr-1.6.1-py3-none-any.whl
-    """
-    wheels_dir = _get_wheels_dir()
-    if not os.path.isdir(wheels_dir):
-        return None
-
-    # 提取纯包名（去掉版本号等）
-    import re as _re
-    pkg_name = _re.sub(r'[><=~!].*$', '', package_spec).strip().lower()
-    pkg_name = _re.sub(r'[-_.]+', '-', pkg_name)
-
-    for f in os.listdir(wheels_dir):
-        if not f.endswith('.whl'):
-            continue
-        # wheel 文件名格式: {package}-{version}-{pyver}-{abi}-{plat}.whl
-        whl_name = f.split('-')[0].lower()
-        whl_name = _re.sub(r'[-_.]+', '-', whl_name)
-        if whl_name == pkg_name:
-            return os.path.join(wheels_dir, f)
-
-    return None
-
-
 def _pip_install(package_spec: str) -> bool:
     """调用 pip 安装包（离线优先），返回是否成功
 
@@ -98,11 +70,11 @@ def _pip_install(package_spec: str) -> bool:
     1. 先在 wheels/ 目录查找离线 wheel 包
     2. 没找到则从网络下载 wheel 到本地，再从本地安装
     """
-    # 尝试离线安装
-    offline_wheel = _find_offline_wheel(package_spec)
-    if offline_wheel:
-        logger.info(f"📦 找到离线 wheel: {os.path.basename(offline_wheel)}，正在安装...")
-        cmd = [sys.executable, '-m', 'pip', 'install', '--no-index', offline_wheel]
+    # 尝试离线安装（使用 --find-links 以自动解析所有依赖）
+    wheels_dir = _get_wheels_dir()
+    if os.path.isdir(wheels_dir) and any(f.endswith('.whl') for f in os.listdir(wheels_dir)):
+        logger.info(f"📦 找到本地 wheel 缓存: {wheels_dir}，正在安装...")
+        cmd = [sys.executable, '-m', 'pip', 'install', '--no-index', '--find-links', wheels_dir, package_spec]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if result.returncode == 0:
@@ -144,24 +116,24 @@ def _pip_install(package_spec: str) -> bool:
         logger.warning(f"⚠️ 依赖下载异常: {package_spec} - {e}")
         return False
 
-    # 2. 从本地 wheels 目录安装
-    offline_wheel = _find_offline_wheel(package_spec)
-    if offline_wheel:
-        logger.info(f"📦 从本地 wheel 安装: {os.path.basename(offline_wheel)}")
-        install_cmd = [sys.executable, '-m', 'pip', 'install', '--no-index', offline_wheel]
-        try:
-            result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=120)
-            if result.returncode == 0:
-                logger.info(f"✅ 依赖安装成功: {package_spec}")
-                return True
-            else:
-                logger.warning(f"❌ 本地安装失败: {package_spec}\n{result.stderr[-500:]}")
-                return False
-        except Exception as e:
-            logger.warning(f"⚠️ 本地安装异常: {package_spec} - {e}")
+    # 2. 从本地 wheels 目录安装（连同所有依赖一起）
+    logger.info(f"📦 正在从本地安装: {package_spec} ...")
+    install_cmd = [
+        sys.executable, '-m', 'pip', 'install',
+        '--no-index',
+        '--find-links', wheels_dir,
+        package_spec,
+    ]
+    try:
+        result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode == 0:
+            logger.info(f"✅ 依赖安装成功: {package_spec}")
+            return True
+        else:
+            logger.warning(f"❌ 本地安装失败: {package_spec}\n{result.stderr[-500:]}")
             return False
-    else:
-        logger.warning(f"⚠️ 下载后未找到 wheel 文件: {package_spec}")
+    except Exception as e:
+        logger.warning(f"⚠️ 本地安装异常: {package_spec} - {e}")
         return False
 
 
