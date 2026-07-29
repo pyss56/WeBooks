@@ -11,87 +11,6 @@ logger = logging.getLogger(__name__)
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 DB_PATH = os.path.join(DB_DIR, 'data.db')
 
-# ============ 数据库版本管理 ============
-
-CURRENT_SCHEMA_VERSION = 1
-
-
-def _init_schema_version(conn):
-    """创建 schema_version 表（幂等）"""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS schema_version (
-            version INTEGER PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-            description TEXT DEFAULT NULL
-        )
-    """)
-
-
-def _get_schema_version(conn) -> int:
-    """获取当前数据库版本，无记录返回 0"""
-    try:
-        row = conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
-        return row['v'] if row and row['v'] else 0
-    except Exception:
-        return 0
-
-
-def _apply_migration(conn, version: int, description: str, sqls: list):
-    """应用一个迁移版本"""
-    for sql in sqls:
-        conn.execute(sql)
-    conn.execute(
-        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
-        (version, description)
-    )
-    conn.commit()
-    logger.info(f"数据库迁移 v{version}: {description}")
-
-
-def _supplementary_migration(conn, table_desc, col_name, alter_sql):
-    """补充迁移：尝试给表加列，列已存在则静默忽略"""
-    try:
-        conn.execute(alter_sql)
-        conn.commit()
-        logger.info(f"补充迁移: {table_desc} 增加 {col_name} 列")
-    except Exception:
-        pass
-
-
-def _run_migrations(conn):
-    """按版本号执行增量迁移"""
-    _init_schema_version(conn)
-    current = _get_schema_version(conn)
-
-    if current < 1:
-        _apply_migration(conn, 1, '建表 + transaction 表增加 is_adjustment 列', [
-            "CREATE TABLE IF NOT EXISTS user_default_transaction ("
-            "    id                  INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "    user_code           TEXT NOT NULL UNIQUE,"
-            "    account_id          TEXT NOT NULL,"
-            "    income_account_id   TEXT DEFAULT NULL,"
-            "    transfer_to_account_id TEXT DEFAULT NULL,"
-            "    default_tx_type     TEXT DEFAULT 'expense',"
-            "    category_id         TEXT DEFAULT NULL,"
-            "    income_category_id  TEXT DEFAULT NULL,"
-            "    message_log_id      INTEGER DEFAULT NULL,"
-            "    source              TEXT DEFAULT NULL,"
-            "    source_user         TEXT DEFAULT NULL,"
-            "    created_by          TEXT DEFAULT NULL,"
-            "    created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),"
-            "    updated_by          TEXT DEFAULT NULL,"
-            "    updated_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))"
-            ")",
-            "ALTER TABLE \"transaction\" ADD COLUMN is_adjustment INTEGER DEFAULT 0",
-        ])
-
-    # ── 补充迁移：对旧数据库自动补列（幂等，已存在则忽略） ──
-    _supplementary_migration(conn, 'user_default_transaction', 'transfer_to_account_id',
-                             "ALTER TABLE user_default_transaction ADD COLUMN transfer_to_account_id TEXT DEFAULT NULL")
-    _supplementary_migration(conn, '"transaction"', 'is_adjustment',
-                             "ALTER TABLE \"transaction\" ADD COLUMN is_adjustment INTEGER DEFAULT 0")
-
-
 def _create_all_tables(conn):
     """创建所有表（最终形态），包含所有历史迁移逻辑（幂等安全）"""
     conn.execute("""
@@ -579,9 +498,6 @@ def init_db():
     try:
         _create_all_tables(conn)
         conn.commit()
-
-        # 执行增量迁移（按版本号）
-        _run_migrations(conn)
 
         # 初始化默认角色和菜单
         init_default_roles()

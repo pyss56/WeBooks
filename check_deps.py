@@ -96,7 +96,7 @@ def _pip_install(package_spec: str) -> bool:
 
     安装顺序：
     1. 先在 wheels/ 目录查找离线 wheel 包
-    2. 没找到则从网络安装
+    2. 没找到则从网络下载 wheel 到本地，再从本地安装
     """
     # 尝试离线安装
     offline_wheel = _find_offline_wheel(package_spec)
@@ -109,33 +109,59 @@ def _pip_install(package_spec: str) -> bool:
                 logger.info(f"✅ 离线安装成功: {package_spec}")
                 return True
             else:
-                logger.warning(f"⚠️ 离线安装失败，尝试在线安装: {result.stderr[-200:]}")
+                logger.warning(f"⚠️ 离线安装失败，尝试在线下载: {result.stderr[-200:]}")
         except Exception as e:
-            logger.warning(f"⚠️ 离线安装异常，尝试在线安装: {e}")
+            logger.warning(f"⚠️ 离线安装异常，尝试在线下载: {e}")
 
-    # 在线安装（默认阿里云镜像加速）
+    # 在线下载 wheel 到本地，再安装（方便 Docker 重建时使用本地依赖）
     index_url = os.getenv('PIP_INDEX_URL', 'https://mirrors.aliyun.com/pypi/simple/')
     trusted_host = os.getenv('PIP_TRUSTED_HOST', 'mirrors.aliyun.com')
-    cmd = [sys.executable, '-m', 'pip', 'install', '--no-cache-dir']
+    wheels_dir = _get_wheels_dir()
+    os.makedirs(wheels_dir, exist_ok=True)
+
+    # 1. 先下载 wheel 到本地 wheels/ 目录
+    download_cmd = [
+        sys.executable, '-m', 'pip', 'download',
+        '--dest', wheels_dir,
+        '--no-cache-dir',
+    ]
     if index_url:
-        cmd.extend(['-i', index_url])
+        download_cmd.extend(['-i', index_url])
     if trusted_host:
-        cmd.extend(['--trusted-host', trusted_host])
-    cmd.append(package_spec)
+        download_cmd.extend(['--trusted-host', trusted_host])
+    download_cmd.append(package_spec)
+
     try:
-        logger.info(f"正在在线安装依赖: {package_spec} ...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode == 0:
-            logger.info(f"✅ 依赖安装成功: {package_spec}")
-            return True
-        else:
-            logger.warning(f"❌ 依赖安装失败: {package_spec}\n{result.stderr[-500:]}")
+        logger.info(f"📥 正在下载依赖 wheel: {package_spec} ...")
+        result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            logger.warning(f"❌ 依赖下载失败: {package_spec}\n{result.stderr[-500:]}")
             return False
     except subprocess.TimeoutExpired:
-        logger.warning(f"⏰ 依赖安装超时: {package_spec}")
+        logger.warning(f"⏰ 依赖下载超时: {package_spec}")
         return False
     except Exception as e:
-        logger.warning(f"⚠️ 依赖安装异常: {package_spec} - {e}")
+        logger.warning(f"⚠️ 依赖下载异常: {package_spec} - {e}")
+        return False
+
+    # 2. 从本地 wheels 目录安装
+    offline_wheel = _find_offline_wheel(package_spec)
+    if offline_wheel:
+        logger.info(f"📦 从本地 wheel 安装: {os.path.basename(offline_wheel)}")
+        install_cmd = [sys.executable, '-m', 'pip', 'install', '--no-index', offline_wheel]
+        try:
+            result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                logger.info(f"✅ 依赖安装成功: {package_spec}")
+                return True
+            else:
+                logger.warning(f"❌ 本地安装失败: {package_spec}\n{result.stderr[-500:]}")
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ 本地安装异常: {package_spec} - {e}")
+            return False
+    else:
+        logger.warning(f"⚠️ 下载后未找到 wheel 文件: {package_spec}")
         return False
 
 

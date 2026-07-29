@@ -32,4 +32,4 @@ debug_*.py
 # Wheel 离线包（下载后保留，用于无网络部署）
 # wheels/*.whl
 test_*.py
-data/ocr_uploads/a797b50dafa341cba2b3237c1800fc56.jpg
+data/
