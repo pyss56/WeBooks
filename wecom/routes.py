@@ -155,6 +155,8 @@ def _handle_image_message(msg_data: dict, from_user: str, message_log_id: int = 
 
         cmd = merchant or ('其他支出' if bill_type == 'expense' else '其他收入')
         cmd += f' {amount:.2f}' if amount else ' 金额'
+        if bill_type == 'income':
+            cmd = f'收入 {cmd}'
         if account_name:
             # 清理账户名：OCR 可能漏掉括号，将尾部数字还原为 (卡号)
             acct_clean = _clean_account_name(account_name)
@@ -172,6 +174,8 @@ def _handle_image_message(msg_data: dict, from_user: str, message_log_id: int = 
         try:
             cat_name = merchant or ('其他支出' if bill_type == 'expense' else '其他收入')
             cmd_text = f"{cat_name} {amount:.2f}"
+            if bill_type == 'income':
+                cmd_text = f"收入 {cmd_text}"
             if account_name:
                 # 清理账户名：OCR 可能漏掉括号，将尾部数字还原为 (卡号)
                 acct_clean = _clean_account_name(account_name)

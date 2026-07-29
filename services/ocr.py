@@ -183,7 +183,7 @@ def _ocr_ddddocr(image_path: str, detector) -> list:
                 oy2 = int(y2 / 1.5) + y_start
                 all_boxes.append((ox1, oy1, ox2, oy2))
 
-        # CLAHE 增强图检测
+        # CLAHE 增强图检测（仅补充原图未检测到的区域）
         gray = _cv2.cvtColor(roi_big, _cv2.COLOR_BGR2GRAY)
         clahe = _cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
@@ -196,21 +196,31 @@ def _ocr_ddddocr(image_path: str, detector) -> list:
                 oy1 = int(y1 / 1.5) + y_start
                 ox2 = int(x2 / 1.5)
                 oy2 = int(y2 / 1.5) + y_start
-                all_boxes.append((ox1, oy1, ox2, oy2))
+                # 与原图检测框比较，重叠 > 0.3 则跳过（避免重复）
+                dup = False
+                for (ex1, ey1, ex2, ey2) in all_boxes:
+                    ix1, iy1 = max(ox1, ex1), max(oy1, ey1)
+                    ix2, iy2 = min(ox2, ex2), min(oy2, ey2)
+                    if ix2 > ix1 and iy2 > iy1:
+                        y_ov = iy2 - iy1
+                        y_min = min(oy2 - oy1, ey2 - ey1)
+                        if y_ov / y_min >= 0.4:
+                            if (ix2 - ix1) / min(ox2 - ox1, ex2 - ex1) >= 0.3:
+                                dup = True
+                                break
+                if not dup:
+                    all_boxes.append((ox1, oy1, ox2, oy2))
 
-    # ── 去重（IOU > 0.5 视为重复） ──
+    # ── 去重 ──
+    all_boxes = [b for b in all_boxes if b[2] - b[0] >= 5 and b[3] - b[1] >= 5]
     merged = []
     for (x1, y1, x2, y2) in all_boxes:
-        if x2 - x1 < 5 or y2 - y1 < 5:
-            continue
         dup = False
         for (ex1, ey1, ex2, ey2) in merged:
             ix1, iy1 = max(x1, ex1), max(y1, ey1)
             ix2, iy2 = min(x2, ex2), min(y2, ey2)
             if ix2 > ix1 and iy2 > iy1:
-                inter = (ix2 - ix1) * (iy2 - iy1)
-                area = (x2 - x1) * (y2 - y1)
-                if inter / area > 0.5:
+                if (ix2 - ix1) * (iy2 - iy1) / ((x2 - x1) * (y2 - y1)) > 0.5:
                     dup = True
                     break
         if not dup:
@@ -228,14 +238,27 @@ def _ocr_ddddocr(image_path: str, detector) -> list:
         crop = img[y1:y2, x1:x2]
         if crop.size == 0:
             continue
-        # 识别前先增强裁剪区域
         crop_gray = _cv2.cvtColor(crop, _cv2.COLOR_BGR2GRAY)
+
+        # 默认：CLAHE 增强
         crop_clahe = _cv2.createCLAHE(clipLimit=1.5,
                                       tileGridSize=(8, 8)).apply(crop_gray)
         _, buf = _cv2.imencode('.png', crop_clahe)
         text = _ocr_recognizer.classification(buf.tobytes())
-        if text and text.strip():
-            chars.append({'text': text.strip(), 'x': x1, 'y': y1})
+        text = text.strip() if text else ''
+
+        # 对小字符框：若结果含可疑字母，尝试 OTSU 重新识别
+        if text and (y2 - y1) < 55 and re.search(r'[CJIOScjliso]', text):
+            _, otsu = _cv2.threshold(crop_gray, 0, 255,
+                                     _cv2.THRESH_BINARY + _cv2.THRESH_OTSU)
+            _, buf2 = _cv2.imencode('.png', otsu)
+            text2 = _ocr_recognizer.classification(buf2.tobytes())
+            text2 = text2.strip() if text2 else ''
+            if text2 and (text2.isdigit() or not text2.isalpha()):
+                text = text2
+
+        if text:
+            chars.append({'text': text, 'x': x1, 'y': y1})
 
     if not chars:
         return []
@@ -293,6 +316,7 @@ _CHAR_MAP = str.maketrans({
 
 # 标签名映射表（OCR 识别的错字 → 标准标签名）
 _LABEL_ALIASES = {
+    # ── 支付宝/微信通用 ──
     '支付时间': '支付时间', '付素方式': '付款方式', '付款方式': '付款方式',
     '转贝时间': '支付时间', '转账时间': '支付时间',
     '支付方式': '付款方式',
@@ -302,6 +326,13 @@ _LABEL_ALIASES = {
     '商户全称': '商户全称', '商家': '商户',
     '交易单号': '交易单号', '商户单号': '商户单号',
     '当前状态': '当前状态',
+    # ── 银行截图 ──
+    '交易类型': '交易类型', '交易金额': '交易金额',
+    '交易对象': '交易对象', '交易摘要': '交易摘要',
+    '交易时间': '交易时间', '交易时间2': '交易时间',
+    '交易账户': '交易账户', '交易币种': '交易币种',
+    '对方账户': '对方账户',
+    '账户余额': '账户余额', '可用余额': '可用余额',
 }
 
 
@@ -310,20 +341,25 @@ def _extract_label_value(lines: list) -> list:
 
     输入: [{'text': '支付时间2026-07-27', ...}, ...]
     输出: [('支付时间', '2026-07-27 11:50:25'), ('收款方全称', 'xxx'), ...]
+
+    支持两种格式：
+    1. 标准格式: "标签：值"
+    2. 银行格式: "标签值"（无分隔符，适用于交易金额/交易类型等）
     """
     # 从 _LABEL_ALIASES 生成动态正则（所有标签名+别名）
     _all_labels = sorted(set(_LABEL_ALIASES.keys()), key=len, reverse=True)
     _label_pattern = '|'.join(re.escape(l) for l in _all_labels)
 
+    # 银行截图专用标签（值紧跟在标签后，无分隔符）
+    _bank_labels = ['交易金额', '交易类型', '交易时间', '交易对象', '交易摘要',
+                    '交易币种', '账户余额', '可用余额', '对方账户']
+
     pairs = []
     for line in lines:
         text = line['text'].strip()
-        # 用标签名/别名匹配
-        m = re.match(
-            rf'({_label_pattern})'
-            rf'[：:\s]*(.*)',
-            text
-        )
+
+        # 1. 先尝试标准格式：标签(可带别名) + 可选分隔符(：: 或空白)，值紧跟其后
+        m = re.match(rf'({_label_pattern})[：:\s]*(.*)', text)
         if m:
             raw_label = m.group(1).strip()
             raw_value = m.group(2).strip()
@@ -332,6 +368,15 @@ def _extract_label_value(lines: list) -> list:
                 pairs.append((label, raw_value))
             continue
 
+        # 2. 银行格式兜底：标签紧接值（防止标签过长导致前面匹配错位）
+        for bl in _bank_labels:
+            if text.startswith(bl) and len(text) > len(bl):
+                value = text[len(bl):]
+                label = _LABEL_ALIASES.get(bl, bl)
+                if value.strip():
+                    pairs.append((label, value.strip()))
+                break
+
     return pairs
 
 
@@ -339,20 +384,97 @@ def _extract_amount_from_lines(lines: list) -> Optional[float]:
     """从识别行中提取金额
 
     策略：
-    1. 优先找带 ¥/￥ 的行提取数字
-    2. 找纯数字行（3-4 位无小数点，÷100 得到金额）
-    3. 带负号的金额
+    1. 优先找含"金额"标签的行（如"交易金额5C0000"→5000, "金额4000"→4000）
+    2. 带 ¥/￥ 的行
+    3. 纯数字行（3-4 位无小数点，÷100 得到金额）
+    4. 带负号的金额
     """
-    for line in lines:
-        text = line['text']
-        # 带 ¥/￥/元 前缀
-        m = re.search(r'(?:¥|￥)(\d+(?:\.\d{1,2})?)', text)
+
+    def _clean_amount(text: str) -> Optional[float]:
+        """从文本中清理并提取金额，返回 None 表示无法提取"""
+        # 替换 OCR 常见误识: y/Y→¥, 十→去掉
+        cleaned = text.replace('十', '').replace('y', '¥').replace('Y', '¥')
+
+        # 如果原文本有 C/c（千位逗号），按逗号位置拆分
+        if 'C' in text or 'c' in text:
+            idx = text.lower().index('c')
+            before = ''.join(re.findall(r'\d', text[:idx]))
+            after = ''.join(re.findall(r'\d', text[idx+1:]))
+            if before and after:
+                int_part = before + after[:3]
+                dec_part = after[3:]
+                try:
+                    val = float(f"{int_part}.{dec_part}" if dec_part else int_part)
+                    if 1.0 < val < 999999:
+                        return val
+                except ValueError:
+                    pass
+
+        # 标准处理：尝试小数金额（¥1234.56 或带小数点的）
+        # 要求有实际小数点 "."，或数字较短（≤4位且小于9999）
+        m = re.search(r'(?:¥|￥)?(\d+\.\d{1,2})', cleaned)
         if m:
             try:
-                return float(m.group(1))
+                v = float(m.group(1))
+                if 1.0 <= v < 999999:
+                    return v
             except ValueError:
                 pass
-        # 带负号（退款/扣款）
+        # 无小数点的独立短数字（前后都不是数字，且3-4位）
+        m = re.search(r'(?:¥|￥)?(?<!\d)(\d{3,4})(?!\d)', cleaned)
+        if m:
+            try:
+                v = float(m.group(1))
+                if 1.0 <= v < 9999:
+                    return v
+            except ValueError:
+                pass
+        # 去掉所有非数字，再解析
+        digits = re.sub(r'[^\d]', '', cleaned)
+        if not digits:
+            return None
+        n = len(digits)
+        try:
+            val = float(digits)
+            if val < 1.0:
+                return None  # 过滤 0/00 等无效金额
+            if n <= 4:
+                if val < 9999:
+                    return val
+            elif n == 5:
+                r = val / 100.0
+                if 1.0 <= r < 99999:
+                    return r
+            elif n >= 6:
+                r = float(f"{digits[:-2]}.{digits[-2:]}")
+                if 1.0 <= r < 999999:
+                    return r
+        except ValueError:
+            pass
+        return None
+
+    # ── 1. 含"金额"标签的行（最可靠） ──
+    for line in lines:
+        text = line['text'].strip()
+        if '金额' not in text:
+            continue
+        r = _clean_amount(text)
+        if r is not None:
+            return r
+
+    # ── 2. 带 ¥/￥ 前缀（含 y 误识） — 仅处理包含金额符号的行 ──
+    for line in lines:
+        text = line['text']
+        if '¥' not in text and '￥' not in text and 'y' not in text and 'Y' not in text:
+            continue
+        text = text.replace('y', '¥').replace('Y', '¥').replace('十', '')
+        r = _clean_amount(text)
+        if r is not None:
+            return r
+
+    # ── 3. 带负号（退款/扣款） ──
+    for line in lines:
+        text = line['text']
         m = re.search(r'-(\d+(?:\.\d{1,2})?)', text)
         if m:
             try:
@@ -360,41 +482,56 @@ def _extract_amount_from_lines(lines: list) -> Optional[float]:
             except ValueError:
                 pass
 
-    # 找行内纯数字（带可选负号前缀，无小数点则 ÷100）
+    # ── 4. 纯数字行（排除余额/时间等干扰） ──
     for line in lines:
         text = line['text'].strip()
-        # 排除明显不是金额的行
         if any(kw in text for kw in ('时间', '单号', '机构', '方式',
                                      '奖励', '状态', '账单', '商家',
-                                     '收款', '商户', '商品', '推荐')):
+                                     '收款', '商户', '商品', '推荐',
+                                     '余额', '可用')):
             continue
-        # 先把中文数字转成阿拉伯数字
         cleaned = text.translate(_CHAR_MAP)
-        # 处理负号前缀（—、－、- 等）
         negative = False
         digits_part = cleaned
         if cleaned and cleaned[0] in ('—', '－', '-'):
             negative = True
             digits_part = cleaned[1:].lstrip()
-        elif cleaned.startswith('一'):  # OCR 将负号识别为"一"
+        elif cleaned.startswith('一'):
             negative = True
             digits_part = cleaned[1:].lstrip()
 
-        # 纯数字 3-5 位
         m = re.match(r'^(\d{3,5})$', digits_part)
         if m:
             try:
                 val = float(m.group(1))
-                # 3 位数字（如 550→5.50, 088→0.88）
                 if 100 <= val <= 999:
                     r = val / 100.0
                     if 0.01 < r < 9999:
                         return -r if negative else r
-                # 4 位数字（如 1288→12.88, 1980→19.80）
                 if 1000 <= val <= 9999:
                     r = val / 100.0
                     if 0.01 < r < 9999:
                         return -r if negative else r
+            except ValueError:
+                pass
+
+    # ── 5. 兜底：无英文字母的行中搜索独立数字 ──
+    for line in lines:
+        text = line['text'].strip()
+        if re.search(r'[a-zA-Z]', text):
+            continue
+        if any(kw in text for kw in ('时间', '单号', '机构', '方式',
+                                     '奖励', '状态', '账单', '商家',
+                                     '收款', '商户', '商品', '推荐',
+                                     '余额', '可用')):
+            continue
+        cleaned = text.translate(_CHAR_MAP)
+        m = re.search(r'(?<!\d)(\d{3,5})(?!\d)', cleaned)
+        if m:
+            try:
+                val = float(m.group(1))
+                if 0.01 < val < 99999:
+                    return val
             except ValueError:
                 pass
 
@@ -405,7 +542,7 @@ def _extract_time_from_lines(lines: list) -> Optional[str]:
     """从识别行中提取支付时间"""
     from datetime import datetime as _dt
     for label, value in lines:
-        if label == '支付时间':
+        if label in ('支付时间', '交易时间'):
             v = value.strip()
             # 先用 "年月日" 中文格式正则定位
             m = re.search(r'(\d{4})\s*年\s*(\d*)\s*月\s*(\d{1,2})\s*日', v)
@@ -413,12 +550,10 @@ def _extract_time_from_lines(lines: list) -> Optional[str]:
                 year = m.group(1)
                 month_str = m.group(2)
                 day = m.group(3).zfill(2)
-                # 月份可能被 OCR 漏掉
                 if not month_str:
                     month = str(_dt.now().month).zfill(2)
                 else:
                     month = month_str.zfill(2)
-                # 日后面的数字是时间
                 rest = v[m.end():]
                 nums = re.findall(r'\d+', rest)
                 nums_str = ''.join(nums)
@@ -439,13 +574,37 @@ def _extract_time_from_lines(lines: list) -> Optional[str]:
                     h, mi, s = rest[:2], rest[2:4], rest[4:6].zfill(2) if len(rest) >= 6 else '00'
                 else:
                     h, mi, s = '00', '00', '00'
-                # 校验月份和日期
                 try:
                     mo_i, d_i = int(month), int(day)
                     if 1 <= mo_i <= 12 and 1 <= d_i <= 31:
                         return f"{year}-{month}-{day} {h.zfill(2)}:{mi.zfill(2)}:{s}"
                 except ValueError:
                     pass
+
+    # 兜底：在全文中搜索 8-14 位纯数字（解决交易时间含 OCR 噪声）
+    for label, value in lines:
+        if label not in ('支付时间', '交易时间'):
+            continue
+        v = value.strip()
+        # 替换常见 OCR 噪声：字母全去掉
+        cleaned = re.sub(r'[a-zA-Z]', '', v)
+        digits = re.sub(r'[^\d]', '', cleaned)
+        if len(digits) >= 8:
+            # 找第一个合法的日期串（前4位 2000-2099，月1-12，日1-31）
+            for start in range(len(digits) - 7):
+                candidate = digits[start:start+14] if len(digits[start:]) >= 14 else digits[start:]
+                if len(candidate) < 8:
+                    continue
+                y, m, d = candidate[:4], candidate[4:6], candidate[6:8]
+                try:
+                    yi, mi, di = int(y), int(m), int(d)
+                    if 2000 <= yi <= 2099 and 1 <= mi <= 12 and 1 <= di <= 31:
+                        h = candidate[8:10] if len(candidate) >= 10 else '00'
+                        mi2 = candidate[10:12] if len(candidate) >= 12 else '00'
+                        s = candidate[12:14] if len(candidate) >= 14 else '00'
+                        return f"{y}-{m}-{d} {h}:{mi2}:{s}"
+                except ValueError:
+                    continue
     return None
 
 
@@ -484,20 +643,89 @@ def parse_screenshot(texts: list) -> dict:
         bill_type = 'income'
 
     # 5. 收款方（用作科目/商户名）
-    merchant = fields.get('收款方全称') or fields.get('商户全称') or ''
-    # 回退：从未标记的文本中提取"付款给XXX"
+    merchant = fields.get('收款方全称') or fields.get('商户全称') or fields.get('交易对象') or ''
+    # 回退：从未标记的文本中提取"付款给XXX"或"交易对象XXX"
     if not merchant:
         m = re.search(r'付款给(.{2,20}?)(?:\s|$|收款|支付|转账)', full_text)
         if not m:
             m = re.search(r'扫二维码付款给(.{2,20}?)(?:\s|$|收款|支付|转账)', full_text)
+        if not m:
+            m = re.search(r'交易对象(.{2,20}?)(?:\s|$|交易|摘要)', full_text)
         if m:
             merchant = m.group(1).strip()
 
     # 6. 付款方式（用作账户）
-    account_name = fields.get('付款方式') or ''
+    account_name = fields.get('付款方式') or fields.get('交易账户') or ''
+    # 回退：识别账户类型 + 尾号（尾号即使不准也对别名匹配有用）
+    if not account_name:
+        _acct_map = {
+            '储育账': '储蓄账户', '储畜账': '储蓄账户', '储蓄账': '储蓄账户',
+            '储蓄': '储蓄账户', '活期': '活期账户',
+            '社保卡': '社保卡', '信用十': '信用卡', '信用': '信用卡',
+            '借记卡': '借记卡', '借计卡': '借记卡', '工资卡': '工资卡',
+        }
+        acct_type = ''
+        for ocr_kw, std_name in _acct_map.items():
+            if ocr_kw in full_text:
+                acct_type = std_name
+                break
+        # 提取尾号（不管 OCR 读得准不准）
+        m = re.search(r'尾号[为是](\d{3,6})', full_text)
+        if acct_type and m:
+            account_name = f"{acct_type}({m.group(1)})"
+        elif m:
+            account_name = f"银行账户({m.group(1)})"
+        elif acct_type:
+            account_name = acct_type
 
     # 7. 交易时间
     transaction_time = _extract_time_from_lines(pairs)
+    # 兜底：直接从原始文本搜索时间
+    if not transaction_time:
+        for t in texts:
+            txt = t['text']
+            if '时间' not in txt:
+                continue
+            # 单字符 OCR 数字纠错（CJ 独立映射为 0/2，不整体替换）
+            _ocr_digit_map = str.maketrans({
+                'C': '0', 'c': '0',
+                'J': '2', 'j': '2',
+                'I': '1', 'l': '1',
+                'O': '0', 'o': '0',
+                'S': '5', 's': '5',
+                'Z': '2', 'z': '2',
+                'B': '8', 'b': '6',
+                'D': '0', 'd': '0',
+                '/': '', '-': '',  # 日期分隔符常被丢弃，直接忽略
+            })
+            cleaned = txt.translate(_ocr_digit_map)
+            digits = re.sub(r'[^\d]', '', cleaned)
+            # 找"20"开头的最长连续数字，从中提取有效时间
+            idx = digits.find('20')
+            if idx >= 0:
+                chunk = digits[idx:idx+14]
+                if len(chunk) >= 8:
+                    for start in range(len(chunk) - 7):
+                        cand = chunk[start:start+14] if len(chunk[start:]) >= 14 else chunk[start:]
+                        if len(cand) < 8:
+                            continue
+                        try:
+                            y, m, d = int(cand[:4]), int(cand[4:6]), int(cand[6:8])
+                            if not (2000 <= y <= 2099 and 1 <= m <= 12 and 1 <= d <= 31):
+                                continue
+                            h = cand[8:10] if len(cand) >= 10 else '00'
+                            mi2 = cand[10:12] if len(cand) >= 12 else '00'
+                            s2 = cand[12:14] if len(cand) >= 14 else '00'
+                            # 校验时/分/秒合理性
+                            hi, mi_i, si = int(h), int(mi2), int(s2)
+                            if not (0 <= hi <= 23 and 0 <= mi_i <= 59 and 0 <= si <= 59):
+                                continue
+                            transaction_time = f"{cand[:4]}-{cand[4:6]}-{cand[6:8]} {h}:{mi2}:{s2}"
+                            break
+                        except ValueError:
+                            continue
+            if transaction_time:
+                break
 
     result = {
         'bill_type': bill_type,
@@ -510,6 +738,93 @@ def parse_screenshot(texts: list) -> dict:
     return result
 
 
+def _retry_time_line(image_path: str, texts: list) -> Optional[str]:
+    """时间识别失败时，仅对时间行区域用不同预处理重试"""
+    import cv2 as _cv2
+    import numpy as _np
+    global _ocr_recognizer
+
+    time_line = None
+    for t in texts:
+        if '时间' in t['text'] and '交易' in t['text']:
+            time_line = t
+            break
+    if not time_line:
+        return None
+
+    img = _cv2.imread(image_path)
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    y = time_line['y']
+    y1 = max(0, y - 5)
+    y2 = min(h, y + 45)
+
+    def _try_recognize(roi: _np.ndarray) -> str:
+        if roi.size == 0:
+            return ''
+        _, buf = _cv2.imencode('.png', roi)
+        t = _ocr_recognizer.classification(buf.tobytes())
+        return t.strip() if t else ''
+
+    def _try_parse_time(text: str) -> Optional[str]:
+        if not text:
+            return None
+        import re
+        # 先尝试直接去掉非数字（I/O等字母可能是分隔符）
+        digits = re.sub(r'[^\d]', '', text)
+        # 再试映射后去非数字
+        if not digits or len(digits) < 8:
+            _map = str.maketrans({
+                'C': '0', 'c': '0', 'J': '2', 'j': '2',
+                'I': '1', 'l': '1', 'O': '0', 'o': '0',
+                'S': '5', 's': '5', 'Z': '2', 'z': '2',
+                'B': '8', 'b': '6', 'D': '0', 'd': '0',
+            })
+            cleaned = text.translate(_map)
+            digits = re.sub(r'[^\d]', '', cleaned)
+        idx = digits.find('20')
+        if idx < 0:
+            return None
+        chunk = digits[idx:idx+14]
+        if len(chunk) < 8:
+            return None
+        for start in range(len(chunk) - 7):
+            cand = chunk[start:start+14] if len(chunk[start:]) >= 14 else chunk[start:]
+            if len(cand) < 8:
+                continue
+            try:
+                y, m, d = int(cand[:4]), int(cand[4:6]), int(cand[6:8])
+                if not (2000 <= y <= 2099 and 1 <= m <= 12 and 1 <= d <= 31):
+                    continue
+                h = cand[8:10] if len(cand) >= 10 else '00'
+                mi = cand[10:12] if len(cand) >= 12 else '00'
+                s = cand[12:14] if len(cand) >= 14 else '00'
+                hi, mii, si = int(h), int(mi), int(s)
+                if not (0 <= hi <= 23 and 0 <= mii <= 59 and 0 <= si <= 59):
+                    continue
+                return f"{cand[:4]}-{cand[4:6]}-{cand[6:8]} {h}:{mi}:{s}"
+            except ValueError:
+                continue
+        return None
+
+    roi = img[y1:y2, :]
+    gray = _cv2.cvtColor(roi, _cv2.COLOR_BGR2GRAY)
+    clahe = _cv2.createCLAHE(clipLimit=5.0, tileGridSize=(8, 8)).apply(gray)
+
+    for desc, proc in [
+        ('CLAHE 3x', _cv2.resize(clahe, None, fx=3, fy=3, interpolation=_cv2.INTER_CUBIC)),
+        ('OTSU 3x', _cv2.resize(_cv2.threshold(clahe, 0, 255, _cv2.THRESH_BINARY + _cv2.THRESH_OTSU)[1], None, fx=3, fy=3, interpolation=_cv2.INTER_CUBIC)),
+        ('反转 3x', _cv2.resize(_cv2.bitwise_not(clahe), None, fx=3, fy=3, interpolation=_cv2.INTER_CUBIC)),
+    ]:
+        text = _try_recognize(proc)
+        t = _try_parse_time(text)
+        if t:
+            return t
+
+    return None
+
+
 def process_image(image_path: str) -> dict:
     """处理图片：OCR识别 + 解析，返回结构化交易数据"""
     texts = ocr_image(image_path)
@@ -520,6 +835,11 @@ def process_image(image_path: str) -> dict:
             'raw_texts': [],
         }
     parsed = parse_screenshot(texts)
+    # 时间未识别出时，仅对时间行区域重试
+    if not parsed.get('transaction_time'):
+        retry_time = _retry_time_line(image_path, texts)
+        if retry_time:
+            parsed['transaction_time'] = retry_time
     parsed['success'] = True
     parsed['raw_texts'] = texts
     return parsed
